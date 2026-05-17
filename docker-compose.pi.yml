@@ -1,45 +1,45 @@
 # =========================================================
-# Raspberry Pi overlay — adds the kernel video devices the
-# streamer needs to use the on-board h264_v4l2m2m hardware
-# encoder.
+# Raspberry Pi 4 overlay — passes the kernel video devices
+# into the streamer container so it can use the on-board
+# h264_v4l2m2m hardware H.264 encoder.
 #
-# Use with:
+# Pi 4 users:
 #   docker compose -f docker-compose.yml -f docker-compose.pi.yml up -d
 #
 # Or persist via shell:
 #   export COMPOSE_FILE=docker-compose.yml:docker-compose.pi.yml
 #   docker compose up -d
 #
+# Pi 5 users:
+#   The BCM2712 has NO fixed-function H.264 encoder — do NOT
+#   use this overlay. Run the base docker-compose.yml on its
+#   own; the streamer auto-detects Pi 5 and applies a tuned
+#   libx264 profile (720p30 veryfast) automatically.
+#
 # ─────────────────────────────────────────────────────────
-# Before using this file, check what video devices your Pi
-# actually exposes:
+# Before using this file on Pi 4, check which video devices
+# your Pi OS exposes:
 #
 #     ls /dev/video*
 #
-# On modern Raspberry Pi OS (Bookworm / 64-bit, Pi 4):
+# On Raspberry Pi OS Bookworm / 64-bit (Pi 4):
 #     /dev/video10  → decoder
 #     /dev/video11  → H.264 encoder    ← this is the one we want
 #     /dev/video12  → ISP
 #
 # On Bullseye and earlier the encoder may be at /dev/video1.
-# On Raspberry Pi 5 there is NO hardware H.264 encoder — the
-# v4l2m2m codec stack was dropped in favour of the new ISP
-# unit which is not exposed via v4l2. Pi 5 users should run
-# WITHOUT this overlay; the streamer's runtime fallback will
-# pick libx264 automatically.
 #
 # If you see an error like:
 #   "error gathering device information while adding custom
 #    device /dev/video10: no such file or directory"
 # …it means that device doesn't exist on your Pi. Either:
-#   (a) load the kernel module (Bookworm/Pi 4):
+#   (a) load the kernel module (Bookworm / Pi 4):
 #       echo 'dtoverlay=rpivid-v4l2' | sudo tee -a /boot/firmware/config.txt
 #       sudo reboot
 #   (b) edit the `devices:` block below to match your /dev/video*
-#   (c) just don't use this overlay — the runtime fallback in
-#       v1.6 detects HW encoder failure and switches to libx264
-#       automatically. Performance is fine on a Pi 4 at 720p30
-#       ultrafast.
+#   (c) just don't use this overlay — the runtime fallback detects
+#       HW encoder failure and falls back to libx264 automatically.
+#       Performance is fine on a Pi 4 at 720p30 ultrafast.
 # ─────────────────────────────────────────────────────────
 services:
   streamer:

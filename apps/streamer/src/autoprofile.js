@@ -49,7 +49,9 @@ function detectHost() {
   // Pi 5 dropped the v4l2m2m H.264 encoder block — the BCM2712 has
   // no fixed-function H.264 hardware. We must NOT pick h264_v4l2m2m
   // on a Pi 5 even though the FFmpeg binary still lists it.
-  const isPi5 = /raspberry pi 5/i.test(piModel || "");
+  // Also check the Hardware field (BCM2712) as a fallback in case
+  // the Model string is absent or formatted differently in future firmware.
+  const isPi5 = /raspberry pi 5/i.test(piModel || "") || /BCM2712/i.test(cpuinfo);
 
   // Generic "weak ARM box" detector: ARM with <= 4 cores or <= 4 GB RAM.
   const isWeakArm = (arch === "arm" || arch === "arm64") && (cores <= 4 || totalMemGB <= 4);
@@ -137,8 +139,9 @@ function pickEncoder(host) {
  * explicit STREAM_* env vars the operator set.
  *
  * Categories:
- *   - 'pi'        : Raspberry Pi (or similar single-board ARM).
- *                   720p30 software + hwenc when available.
+ *   - 'pi5'       : Raspberry Pi 5 (BCM2712). No HW H.264 encoder, but
+ *                   Cortex-A76 cores are fast enough for 720p30 veryfast.
+ *   - 'pi'        : Raspberry Pi 4 and older. 720p30, HW encoder when available.
  *   - 'small-arm' : Weak ARM box, but not a Pi. 720p30 ultrafast.
  *   - 'modest'    : 1-2 cores x86. 720p30 veryfast.
  *   - 'standard'  : 4-8 cores x86. 1080p30 veryfast (current defaults).
@@ -147,7 +150,9 @@ function pickEncoder(host) {
 function pickProfile(host, encoder) {
   let category;
 
-  if (host.isPi) {
+  if (host.isPi5) {
+    category = "pi5";
+  } else if (host.isPi) {
     category = "pi";
   } else if (host.isWeakArm) {
     category = "small-arm";
@@ -164,6 +169,19 @@ function pickProfile(host, encoder) {
 
   // Base profile lookup.
   const base = {
+    // Pi 5 (BCM2712, Cortex-A76 @ 2.4 GHz): no HW H.264 encoder, but the
+    // faster cores handle veryfast comfortably. x264Threads=3 leaves one
+    // core free for Chromium rendering and the OS.
+    pi5: {
+      width: 1280, height: 720, fps: 30,
+      bitrateKbps: 3500, maxrateKbps: 3500, bufsizeKbps: 7000,
+      audioBitrateKbps: 128,
+      preset: "veryfast",
+      x264Threads: 3,
+      tune: "zerolatency",
+      screencastQuality: 70,
+      captureEveryNthFrame: 1,
+    },
     pi: {
       width: 1280, height: 720, fps: 30,
       bitrateKbps: 2800, maxrateKbps: 2800, bufsizeKbps: 5600,
