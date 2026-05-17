@@ -1,0 +1,31 @@
+# =========================================================
+# GHCR overlay — use pre-built images from GitHub Container
+# Registry instead of building locally.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.ghcr.yml pull
+#   docker compose -f docker-compose.yml -f docker-compose.ghcr.yml up -d
+#
+# Or persist via env var:
+#   export COMPOSE_FILE=docker-compose.yml:docker-compose.ghcr.yml
+#   docker compose pull && docker compose up -d
+#
+# Multi-arch images are built by .github/workflows/release.yml on
+# every `v*` tag. The arm64 manifest works on Pi 4 / Pi 5 / Apple
+# Silicon; everything else gets amd64 transparently.
+#
+# Pin the version for reproducible deploys:
+#   CACHESTREAM_VERSION=1.6.0 docker compose ... up -d
+# =========================================================
+services:
+  web:
+    # When this overlay is used, the explicit image: tells compose
+    # to pull from GHCR. The base file's `build:` stanza is still
+    # present but only consulted if no image is found locally
+    # — `pull_policy: always` makes sure we get the registry copy.
+    image: ghcr.io/cachenetworks/cachestream-web:${CACHESTREAM_VERSION:-latest}
+    pull_policy: always
+
+  streamer:
+    image: ghcr.io/cachenetworks/cachestream-streamer:${CACHESTREAM_VERSION:-latest}
+    pull_policy: always

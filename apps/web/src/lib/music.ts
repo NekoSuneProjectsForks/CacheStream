@@ -1,0 +1,423 @@
+/**
+ * Music engine (web container side).
+ *
+ * Spawns an FFmpeg process that produces a continuous stream of
+ * PCM s16le stereo @ 44.1 kHz into a named FIFO. The streamer
+ * container reads the same FIFO as its audio input.
+ *
+ *   ┌───────────────────────┐        ┌────────────┐
+ *   │  music FFmpeg (web)   │ writes │  audio     │ reads
+ *   │  source: file | radio │ ─────▶ │  FIFO      │ ────▶ streamer FFmpeg
+ *   │  loudnorm filter      │        │ /app/audio │
+ *   └───────────────────────┘        └────────────┘
+ *
+ * The streamer's main FFmpeg consumes the FIFO as a raw PCM input
+ * (`-f s16le -ar 44100 -ac 2 -i <fifo>`) and AAC-encodes it for
+ * the RTMP output. This lets the music change without ever
+ * dropping the video stream.
+ *
+ * If the music engine isn't running OR no track/radio is queued,
+ * the streamer's FFmpeg falls back to its built-in silent
+ * anullsrc input (see apps/streamer/src/stream.js) so the
+ * broadcast still has the required audio track.
+ *
+ * State (`mode`, `volume`, `queue`, etc.) is kept in memory plus
+ * the kv table so it survives restarts.
+ */
+
+import fs from "node:fs";
+import path from "node:path";
+import { spawn, type ChildProcess } from "node:child_process";
+import crypto from "node:crypto";
+import { config } from "./config";
+import { getStore, type MusicTrack } from "./store";
+import { kvGet, kvSet } from "./db";
+
+// Two FIFOs, both always-open from the streamer's read side:
+//
+//   silence.fifo  ← constant silent PCM written by the always-on filler.
+//                   Acts as the "carrier" so amix never sees both inputs
+//                   absent at the same instant.
+//   music.fifo    ← real music PCM written by a per-track ffmpeg, only
+//                   when something is playing. When nothing's playing
+//                   the FIFO simply has no writer; amix's
+//                   dropout_transition=0 falls back to the silence
+//                   carrier with zero glitch.
+//
+// Why two FIFOs? In v1.5 we used a single FIFO and toggled which
+// ffmpeg wrote to it. Even a millisecond gap during the handoff was
+// enough for the streamer's main ffmpeg to mark the audio track as
+// ended; Twitch then dropped the connection. With two parallel FIFOs
+// + amix dropout_transition=0, the music writer can come and go
+// without ever interrupting the audio stream the streamer is reading.
+const SILENCE_FIFO = "/app/audio/silence.fifo";
+const MUSIC_FIFO   = "/app/audio/music.fifo";
+const AUDIO_FORMAT = ["-f", "s16le", "-acodec", "pcm_s16le", "-ar", "44100", "-ac", "2"];
+
+export type Mode = "idle" | "library" | "radio";
+
+interface NowPlaying {
+  trackId?: string;
+  title?: string;
+  artist?: string;
+  album?: string;
+  coverPath?: string | null;
+  durationS?: number | null;
+  url?: string;
+  startedAt?: number;
+}
+
+interface MusicStatus {
+  mode: Mode;
+  volume: number;
+  loop: boolean;
+  shuffle: boolean;
+  queue: MusicTrack[];
+  nowPlaying: NowPlaying | null;
+  fifoReady: boolean;
+  lastError: string | null;
+}
+
+class MusicEngine {
+  private ffmpeg: ChildProcess | null = null;
+  /**
+   * Background "silence filler" FFmpeg. Always writes silent PCM
+   * into the FIFO whenever there's no real music playing.
+   *
+   * Why this exists:
+   *   The streamer's main FFmpeg opens the FIFO for read. If no
+   *   process is writing to the other side, FFmpeg blocks on open
+   *   indefinitely — or if it gets interrupted, exits 1 (which
+   *   was the symptom we saw on the Pi). Having a continuous
+   *   writer guarantees the FIFO is always readable; the music
+   *   subsystem just takes over briefly when a track is queued
+   *   then hands back to the filler.
+   *
+   * Cost: anullsrc + raw s16le copy is essentially free
+   * (~0.1% of one core).
+   */
+  private filler: ChildProcess | null = null;
+  private mode: Mode = "idle";
+  private volume = 0.6;
+  private loop = true;
+  private shuffle = false;
+  private queue: MusicTrack[] = [];
+  private nowPlaying: NowPlaying | null = null;
+  private currentRadioUrl: string | null = null;
+  private lastError: string | null = null;
+
+  constructor() {
+    this.volume = clamp01(Number(kvGet("music_volume") ?? "0.6"));
+    this.loop  = kvGet("music_loop") !== "0";
+    this.shuffle = kvGet("music_shuffle") === "1";
+    // Boot the filler immediately so the FIFO has a writer the
+    // moment the streamer's main FFmpeg tries to open it.
+    this._startSilenceFiller();
+  }
+
+  status(): MusicStatus {
+    return {
+      mode: this.mode,
+      volume: this.volume,
+      loop: this.loop,
+      shuffle: this.shuffle,
+      queue: [...this.queue],
+      nowPlaying: this.nowPlaying,
+      fifoReady: this._ensureFifoSilently(),
+      lastError: this.lastError,
+    };
+  }
+
+  // ---- Library scan ----------------------------------------------
+
+  async scanLibrary(): Promise<MusicTrack[]> {
+    const dir = config.music.libraryDir;
+    const out: MusicTrack[] = [];
+    const exts = new Set([".mp3", ".m4a", ".ogg", ".oga", ".flac", ".wav", ".opus"]);
+    try {
+      const stat = fs.statSync(dir);
+      if (!stat.isDirectory()) return [];
+    } catch { return []; }
+
+    // Lazy-load music-metadata so a missing optional dep doesn't
+    // break the rest of the music engine.
+    let parseFile: ((file: string) => Promise<any>) | null = null;
+    try {
+      const mm = await import("music-metadata");
+      parseFile = (file) => mm.parseFile(file, { skipCovers: false, duration: true });
+    } catch (err) {
+      console.warn("[music] music-metadata unavailable, falling back to filename-only:", err);
+    }
+
+    const coversDir = path.join(config.runtime.dataDir, "covers");
+    fs.mkdirSync(coversDir, { recursive: true });
+
+    const files: string[] = [];
+    const walk = (d: string) => {
+      for (const entry of fs.readdirSync(d, { withFileTypes: true })) {
+        const full = path.join(d, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else if (entry.isFile() && exts.has(path.extname(entry.name).toLowerCase())) {
+          files.push(full);
+        }
+      }
+    };
+    walk(dir);
+
+    for (const full of files) {
+      const relPath = path.relative(dir, full);
+      const id = crypto.createHash("sha1").update(relPath).digest("hex").slice(0, 16);
+
+      // Preserve manually-edited metadata across rescans.
+      const existing = getStore().getMusicTrack(id);
+      if (existing?.manual) {
+        out.push(existing);
+        continue;
+      }
+
+      let title: string | null = path.basename(full, path.extname(full));
+      let artist: string | null = null;
+      let album: string | null = null;
+      let durationS: number | null = null;
+      let coverPath: string | null = existing?.coverPath || null;
+
+      if (parseFile) {
+        try {
+          const meta = await parseFile(full);
+          title  = meta.common.title  || title;
+          artist = meta.common.artist || meta.common.artists?.[0] || null;
+          album  = meta.common.album  || null;
+          if (meta.format?.duration) durationS = Math.round(meta.format.duration);
+
+          const picture = meta.common.picture?.[0];
+          if (picture && !coverPath) {
+            const ext = (picture.format || "image/jpeg").split("/")[1] || "jpg";
+            const file = path.join(coversDir, `${id}.${ext}`);
+            fs.writeFileSync(file, picture.data);
+            coverPath = file;
+          }
+        } catch (err) {
+          // Tag parse failed; keep filename fallback.
+        }
+      }
+
+      const track = getStore().upsertMusicTrack({
+        id, path: relPath,
+        title, artist, album, durationS, coverPath,
+        manual: false,
+      });
+      out.push(track);
+    }
+
+    return out;
+  }
+
+  // ---- Queue + controls ------------------------------------------
+
+  enqueue(trackId: string): void {
+    const all = getStore().listMusicTracks();
+    const t = all.find((x) => x.id === trackId);
+    if (!t) throw new Error("track not found");
+    this.queue.push(t);
+    if (this.mode === "idle") this._playNextLibraryTrack();
+  }
+
+  clearQueue(): void { this.queue = []; }
+
+  next(): void {
+    if (this.mode === "library") this._playNextLibraryTrack();
+  }
+
+  stop(): void {
+    this.mode = "idle";
+    this.currentRadioUrl = null;
+    this.nowPlaying = null;
+    this._killFfmpeg();
+    // Silence filler keeps running on its dedicated FIFO — no
+    // restart needed. The streamer's amix just stops mixing in
+    // music and the broadcast continues silent.
+  }
+
+  setVolume(v: number): void {
+    this.volume = clamp01(v);
+    kvSet("music_volume", String(this.volume));
+    // Re-apply by restarting current source (libx264-style hot-volume isn't
+    // possible with a one-shot input; a tiny restart is acceptable).
+    this._restartCurrent();
+  }
+
+  setLoop(loop: boolean): void { this.loop = loop; kvSet("music_loop", loop ? "1" : "0"); }
+  setShuffle(s: boolean): void { this.shuffle = s; kvSet("music_shuffle", s ? "1" : "0"); }
+
+  // ---- Radio -----------------------------------------------------
+
+  playRadio(url: string): void {
+    if (!/^https?:\/\//.test(url)) throw new Error("radio url must be http(s)");
+    this.currentRadioUrl = url;
+    this.mode = "radio";
+    this.queue = [];
+    this.nowPlaying = { url, startedAt: Date.now() };
+    this._spawnFfmpegForInput(["-i", url]);
+  }
+
+  // ---- Internals -------------------------------------------------
+
+  private _playNextLibraryTrack(): void {
+    if (this.queue.length === 0) {
+      // If looping and the library has tracks, refill from the library.
+      if (this.loop) {
+        const all = getStore().listMusicTracks();
+        if (all.length === 0) { this.stop(); return; }
+        this.queue = this.shuffle ? shuffle(all) : all;
+      } else {
+        this.stop();
+        return;
+      }
+    }
+    const track = this.queue.shift()!;
+    this.mode = "library";
+    this.nowPlaying = {
+      trackId: track.id,
+      title:  track.title  || track.path,
+      artist: track.artist || undefined,
+      album:  track.album  || undefined,
+      coverPath: track.coverPath || null,
+      durationS: track.durationS || null,
+      startedAt: Date.now(),
+    };
+    const full = path.join(config.music.libraryDir, track.path);
+    this._spawnFfmpegForInput(["-i", full], () => {
+      // On natural EOF, advance to the next track.
+      if (this.mode === "library") this._playNextLibraryTrack();
+    });
+  }
+
+  private _restartCurrent(): void {
+    if (this.mode === "radio" && this.currentRadioUrl) this.playRadio(this.currentRadioUrl);
+    else if (this.mode === "library" && this.nowPlaying?.trackId) {
+      // Re-queue the current track at the head and restart from it.
+      const all = getStore().listMusicTracks();
+      const t = all.find((x) => x.id === this.nowPlaying!.trackId);
+      if (t) this.queue.unshift(t);
+      this._playNextLibraryTrack();
+    }
+  }
+
+  private _spawnFfmpegForInput(inputArgs: string[], onExit?: () => void): void {
+    this._ensureFifos();
+    this._killFfmpeg();
+    // IMPORTANT: do NOT stop the silence filler. It writes to a
+    // separate FIFO (SILENCE_FIFO); our music writer goes to
+    // MUSIC_FIFO. The streamer amix-es both, so a gap on
+    // MUSIC_FIFO (e.g. between tracks) gracefully falls back to
+    // the silence carrier without dropping the audio stream.
+
+    // -re paces real-time so we don't fill the FIFO faster than
+    // the streamer drains it. volume controls our knob; loudnorm
+    // normalises perceived loudness.
+    const args = [
+      "-hide_banner", "-loglevel", "warning", "-nostats",
+      "-re",
+      ...inputArgs,
+      "-vn",
+      "-af", `volume=${this.volume.toFixed(3)},loudnorm=I=-16:LRA=11:TP=-1.5`,
+      ...AUDIO_FORMAT,
+      "-y", MUSIC_FIFO,
+    ];
+    const proc = spawn("ffmpeg", args, { stdio: ["ignore", "pipe", "pipe"] });
+    this.ffmpeg = proc;
+    proc.stderr.on("data", (chunk) => {
+      const line = chunk.toString().trim();
+      if (line && /error|failed|cannot|unable/i.test(line)) {
+        this.lastError = line;
+      }
+    });
+    proc.on("exit", () => {
+      this.ffmpeg = null;
+      if (onExit) {
+        try { onExit(); } catch (err) { console.warn("[music] onExit:", err); }
+      }
+      // No silence-filler resurrection here — it never stopped.
+      // The MUSIC_FIFO just goes quiet (no writer); amix in the
+      // streamer carries on with the silence FIFO alone.
+    });
+  }
+
+  private _killFfmpeg(): void {
+    if (!this.ffmpeg) return;
+    try { this.ffmpeg.kill("SIGTERM"); } catch {}
+    this.ffmpeg = null;
+  }
+
+  /**
+   * The silence filler runs continuously on its own dedicated
+   * FIFO. It's the always-on audio carrier the streamer's amix
+   * uses as a baseline. Never killed except on container shutdown.
+   */
+  private _startSilenceFiller(): void {
+    if (this.filler) return;
+    this._ensureFifos();
+    try {
+      const proc = spawn("ffmpeg", [
+        "-hide_banner", "-loglevel", "error", "-nostats",
+        "-re",
+        "-f", "lavfi",
+        "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
+        ...AUDIO_FORMAT,
+        "-y", SILENCE_FIFO,
+      ], { stdio: ["ignore", "ignore", "pipe"] });
+      this.filler = proc;
+      proc.on("exit", () => {
+        this.filler = null;
+        // The filler should be immortal. If it dies (mkfifo race,
+        // streamer not yet reading, etc.) wait a beat and respawn.
+        setTimeout(() => this._startSilenceFiller(), 1000);
+      });
+    } catch (err: any) {
+      this.lastError = `silence filler failed: ${err.message}`;
+    }
+  }
+
+  private _stopSilenceFiller(): void {
+    if (!this.filler) return;
+    try { this.filler.kill("SIGTERM"); } catch {}
+    this.filler = null;
+  }
+
+  private _ensureFifos(): void {
+    for (const path of [SILENCE_FIFO, MUSIC_FIFO]) {
+      if (fs.existsSync(path)) {
+        try { if (fs.statSync(path).isFIFO()) continue; } catch {}
+      }
+      try {
+        const r = spawn("mkfifo", [path]);
+        r.on("error", (err) => { this.lastError = `mkfifo ${path} failed: ${err.message}`; });
+      } catch (err: any) {
+        this.lastError = `mkfifo ${path} failed: ${err.message}`;
+      }
+    }
+  }
+
+  private _ensureFifoSilently(): boolean {
+    try {
+      return fs.statSync(SILENCE_FIFO).isFIFO() && fs.statSync(MUSIC_FIFO).isFIFO();
+    } catch { return false; }
+  }
+}
+
+function clamp01(n: number): number {
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.min(1, n));
+}
+
+function shuffle<T>(arr: T[]): T[] {
+  const out = [...arr];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
+let _engine: MusicEngine | null = null;
+export function musicEngine(): MusicEngine { return _engine ||= new MusicEngine(); }

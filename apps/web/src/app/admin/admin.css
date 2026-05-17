@@ -1,0 +1,289 @@
+/* =========================================================
+   Control panel styling.
+   Cyberpunk-adjacent but functional — high contrast, dense,
+   keyboard-friendly. Designed for desktop use (operators).
+   ========================================================= */
+
+.admin-shell {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem 4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  background:
+    radial-gradient(ellipse at 50% -10%, rgba(138,43,255,.18) 0%, transparent 60%),
+    radial-gradient(ellipse at 50% 110%, rgba(0,240,255,.08) 0%, transparent 70%),
+    var(--bg-0);
+  min-height: 100vh;
+}
+
+/* ---- Header ---- */
+.admin-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 1rem;
+}
+.brand-row { display: flex; align-items: center; gap: 1rem; }
+.brand-logo {
+  height: 44px;
+  width: auto;
+  max-width: 120px;
+  object-fit: contain;
+  filter: drop-shadow(0 0 12px rgba(0, 240, 255, 0.3));
+}
+.brand {
+  font-size: 1.6rem; font-weight: 800; letter-spacing: .12em;
+  text-transform: uppercase;
+  text-shadow: 0 0 8px rgba(0,240,255,.55), 0 0 22px rgba(138,43,255,.35);
+}
+.brand-sub { color: var(--text-dim); letter-spacing: .25em; text-transform: uppercase; font-size: .75rem; }
+.head-right { display: flex; align-items: center; gap: 1rem; }
+.user { color: var(--text-dim); font-size: .85rem; }
+.user-label { margin-right: .3rem; text-transform: uppercase; letter-spacing: .15em; font-size: .7rem; opacity: .6; }
+.user strong { color: var(--text); margin-left: .15rem; }
+
+/* ---- Card ---- */
+.card {
+  background: linear-gradient(180deg, rgba(17,22,42,.65) 0%, rgba(10,13,24,.65) 100%);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 1.25rem 1.25rem 1rem;
+  box-shadow: 0 0 0 1px rgba(0,240,255,.02) inset, 0 8px 32px rgba(0,0,0,.4);
+}
+.card-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: .5rem;
+  margin-bottom: 1rem;
+}
+.card-head h2 {
+  font-size: .9rem; font-weight: 700; letter-spacing: .22em;
+  text-transform: uppercase; color: var(--text);
+}
+.subhead {
+  font-size: .7rem; letter-spacing: .25em; text-transform: uppercase;
+  color: var(--text-dim); margin: 1rem 0 .5rem;
+}
+
+/* ---- Status metrics ---- */
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: .75rem;
+  margin-bottom: 1rem;
+}
+.metric {
+  border: 1px solid var(--line-soft);
+  border-radius: 4px;
+  padding: .6rem .75rem;
+  background: rgba(5,6,10,.55);
+}
+.metric-label { font-size: .65rem; text-transform: uppercase; letter-spacing: .2em; color: var(--text-mute); }
+.metric-value { margin-top: .2rem; font-size: .95rem; color: var(--text); word-break: break-word; }
+.metric.tone-ok  .metric-value { color: var(--ok); }
+.metric.tone-err .metric-value { color: var(--err); }
+.mono { font-family: "JetBrains Mono", Menlo, Consolas, monospace; font-size: .85rem; }
+
+/* ---- Badges ---- */
+.badge {
+  font-size: .7rem; letter-spacing: .2em; text-transform: uppercase;
+  padding: .15rem .55rem; border-radius: 999px;
+  border: 1px solid currentColor;
+}
+.badge.ok   { color: var(--ok);  box-shadow: 0 0 8px rgba(74,222,128,.35); }
+.badge.warn { color: var(--warn); }
+.badge.err  { color: var(--err); }
+.badge.mute { color: var(--text-mute); }
+
+/* ---- Buttons ---- */
+.btn-primary, .btn-ghost, .btn-danger {
+  display: inline-flex; align-items: center; justify-content: center; gap: .4rem;
+  padding: .55rem 1rem; border-radius: 4px;
+  font-weight: 700; text-transform: uppercase; letter-spacing: .12em;
+  font-size: .8rem;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: transform .08s ease, box-shadow .15s ease, background .15s ease;
+}
+.btn-primary {
+  background: var(--neon-cyan); color: var(--bg-0); border-color: var(--neon-cyan);
+  box-shadow: 0 0 16px rgba(0,240,255,.35);
+}
+.btn-primary:hover:not(:disabled)  { transform: translateY(-1px); box-shadow: 0 0 24px rgba(0,240,255,.55); }
+.btn-ghost { background: transparent; color: var(--text); border-color: var(--line); }
+.btn-ghost:hover:not(:disabled) { border-color: var(--neon-cyan); }
+.btn-danger { background: transparent; color: var(--err); border-color: var(--err); }
+.btn-danger:hover:not(:disabled) { background: rgba(248,113,113,.08); }
+.btn-primary:disabled, .btn-ghost:disabled, .btn-danger:disabled { opacity: .4; cursor: not-allowed; }
+.sm { padding: .35rem .65rem; font-size: .7rem; }
+.xs { padding: .25rem .5rem; font-size: .65rem; }
+
+/* ---- Inputs ---- */
+.input {
+  background: rgba(5,6,10,.7);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: .5rem .7rem;
+  font-size: .9rem;
+  font-family: inherit;
+  min-width: 120px;
+  outline: none;
+}
+.input:focus { border-color: var(--neon-cyan); box-shadow: 0 0 0 2px rgba(0,240,255,.15); }
+.input.mono { font-family: "JetBrains Mono", Menlo, Consolas, monospace; font-size: .82rem; }
+.input.sm { padding: .35rem .55rem; font-size: .8rem; min-width: 100px; }
+.input.xs { padding: .3rem .45rem; font-size: .75rem; min-width: 60px; max-width: 80px; }
+
+/* ---- Layout helpers ---- */
+.row { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.row.gap { gap: .75rem; margin-top: .75rem; }
+.actions { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: 1rem; }
+.grow { flex: 1; min-width: 0; }
+.hint { margin-top: .6rem; font-size: .8rem; color: var(--text-dim); }
+.hint code { background: rgba(0,240,255,.08); padding: 0 .35rem; border-radius: 3px; }
+.muted { color: var(--text-mute); font-style: italic; }
+
+/* ---- Lists ---- */
+.list { list-style: none; display: flex; flex-direction: column; gap: .35rem; }
+.list-row {
+  display: flex; align-items: center; gap: .5rem;
+  padding: .55rem .75rem;
+  background: rgba(5,6,10,.45);
+  border: 1px solid var(--line-soft);
+  border-radius: 4px;
+}
+.row-title { font-weight: 600; display: flex; align-items: center; gap: .5rem; }
+.row-sub   { font-size: .78rem; color: var(--text-dim); margin-top: .15rem; word-break: break-all; }
+
+.tag {
+  font-size: .6rem; padding: .05rem .45rem; border-radius: 999px;
+  border: 1px solid var(--line); color: var(--text-dim);
+  text-transform: uppercase; letter-spacing: .15em;
+}
+.tag.ok   { color: var(--ok);   border-color: rgba(74,222,128,.5); }
+.tag.warn { color: var(--warn); border-color: rgba(250,204,21,.5); }
+
+/* ---- Overlay builder row ---- */
+.overlay-row {
+  display: flex; align-items: center; gap: .35rem; flex-wrap: wrap;
+  padding: .5rem; margin-bottom: .35rem;
+  border: 1px solid var(--line-soft); border-radius: 4px;
+  background: rgba(5,6,10,.45);
+}
+
+/* ---- Day picker ---- */
+.day-picker { display: inline-flex; gap: .25rem; }
+.day {
+  width: 30px; height: 30px;
+  background: transparent; color: var(--text-dim);
+  border: 1px solid var(--line); border-radius: 4px;
+  cursor: pointer; font-weight: 700; font-size: .8rem;
+}
+.day.on {
+  background: var(--neon-cyan); color: var(--bg-0); border-color: var(--neon-cyan);
+  box-shadow: 0 0 8px rgba(0,240,255,.35);
+}
+
+/* ---- Banner ---- */
+.banner {
+  padding: .7rem 1rem; border-radius: 4px;
+  border: 1px solid currentColor;
+  font-size: .85rem;
+}
+.banner.err { color: var(--err); background: rgba(248,113,113,.08); }
+
+/* ---- Tabs ---- */
+.tab-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .25rem;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: .5rem;
+}
+.tab {
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid transparent;
+  border-radius: 4px 4px 0 0;
+  padding: .5rem .9rem;
+  cursor: pointer;
+  font-weight: 700;
+  font-size: .78rem;
+  text-transform: uppercase;
+  letter-spacing: .14em;
+  transition: color .15s ease, border-color .15s ease, background .15s ease;
+}
+.tab:hover { color: var(--text); }
+.tab.active {
+  color: var(--neon-cyan);
+  border-color: var(--line);
+  background: rgba(5,6,10,.55);
+  box-shadow: 0 0 0 1px rgba(0,240,255,.15) inset, 0 -2px 0 var(--neon-cyan) inset;
+}
+.tab-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  margin-top: .5rem;
+}
+
+/* ---- Footer ---- */
+.admin-foot {
+  margin-top: 2rem;
+  color: var(--text-mute);
+  font-size: .75rem;
+  text-align: center;
+  letter-spacing: .15em;
+  text-transform: uppercase;
+}
+
+/* =========================================================
+   Login gate
+   ========================================================= */
+.auth-gate {
+  display: flex; align-items: center; justify-content: center;
+}
+.auth-card {
+  max-width: 460px; width: 100%;
+  padding: 2.25rem 2rem;
+  background: linear-gradient(180deg, rgba(17,22,42,.75) 0%, rgba(10,13,24,.75) 100%);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 0 0 1px rgba(0,240,255,.04) inset, 0 12px 60px rgba(0,0,0,.55);
+  text-align: center;
+}
+.auth-card .brand { font-size: 2rem; }
+.tagline { color: var(--text-dim); margin: .35rem 0 1.5rem; font-size: .85rem; }
+
+.owner-block {
+  display: flex; align-items: flex-start; gap: .75rem;
+  text-align: left;
+  padding: .9rem 1rem; border-radius: 6px;
+  border: 1px solid var(--line);
+  background: rgba(5,6,10,.6);
+  margin-bottom: 1.25rem;
+}
+.owner-block .label { font-size: .7rem; text-transform: uppercase; letter-spacing: .2em; color: var(--text-mute); }
+.owner-block .value { font-weight: 700; margin-top: .15rem; }
+.owner-block .hint { margin-top: .35rem; font-size: .8rem; color: var(--text-dim); }
+.owner-block .hint.warn { color: var(--warn); }
+.dot {
+  display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+  margin-top: .35rem; flex: none;
+}
+.dot.ok   { background: var(--ok);   box-shadow: 0 0 8px rgba(74,222,128,.6); }
+.dot.warn { background: var(--warn); box-shadow: 0 0 8px rgba(250,204,21,.5); }
+
+.login-btn {
+  width: 100%;
+  background: #9146ff; color: #fff; border-color: #9146ff;
+  box-shadow: 0 0 18px rgba(145,70,255,.4);
+}
+.login-btn:hover { box-shadow: 0 0 28px rgba(145,70,255,.6); }
+.btn-ghost-link {
+  display: inline-block; margin-top: 1rem;
+  color: var(--text-dim); font-size: .8rem;
+}

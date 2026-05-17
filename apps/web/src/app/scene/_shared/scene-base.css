@@ -1,0 +1,299 @@
+/* =========================================================
+   Shared base layer for built-in + custom scenes.
+   Pulled into each scene route via `import` so Next.js
+   bundles a per-page CSS chunk (no FOUC at render time).
+   =========================================================
+   Convention: every scene gets a full-bleed background with
+   a cyberpunk gradient + grid + scanlines layer. Templates
+   layer text/widgets on top. Animations are GPU-friendly
+   (transform/opacity only) so they hold 30 FPS in headless
+   Chromium without a real display.
+   ========================================================= */
+
+html, body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background: #05060a;
+  color: #e6f7ff;
+  font-family: "Segoe UI", system-ui, -apple-system, "JetBrains Mono", Menlo, Consolas, monospace;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
+}
+
+.cs-scene {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.6rem;
+  text-align: center;
+  isolation: isolate;
+}
+
+/* ----- Animated grid backdrop ----------------------------- */
+.cs-grid {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(0, 240, 255, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 240, 255, 0.06) 1px, transparent 1px);
+  background-size: 80px 80px;
+  mask-image: radial-gradient(ellipse at center, #000 35%, transparent 75%);
+  -webkit-mask-image: radial-gradient(ellipse at center, #000 35%, transparent 75%);
+  animation: cs-grid-drift 14s linear infinite;
+  will-change: background-position;
+  pointer-events: none;
+  z-index: 0;
+}
+@keyframes cs-grid-drift {
+  from { background-position: 0 0, 0 0; }
+  to   { background-position: 0 80px, 80px 0; }
+}
+
+/* ----- CRT scanlines ------------------------------------- */
+.cs-scanlines {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0.015) 0px,
+    rgba(255, 255, 255, 0.015) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+  mix-blend-mode: overlay;
+  opacity: 0.55;
+  z-index: 0;
+}
+
+/* ----- Radial gradient wash ------------------------------ */
+.cs-wash {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse at 50% 35%, var(--cs-accent, rgba(138, 43, 255, 0.18)) 0%, transparent 60%),
+    radial-gradient(ellipse at 50% 100%, var(--cs-accent2, rgba(0, 240, 255, 0.14)) 0%, transparent 70%);
+  z-index: 0;
+}
+
+/* ----- Content layer ------------------------------------- */
+.cs-content {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.4rem;
+  padding: 4rem;
+  max-width: 1400px;
+}
+
+/* ----- Typography ---------------------------------------- */
+.cs-eyebrow {
+  font-size: clamp(0.85rem, 1.1vw, 1.05rem);
+  letter-spacing: 0.4em;
+  text-transform: uppercase;
+  color: var(--cs-fg-dim, rgba(230, 247, 255, 0.6));
+  padding: 0.55rem 1.4rem;
+  border: 1px solid var(--cs-accent-line, rgba(0, 240, 255, 0.35));
+  border-radius: 999px;
+  background: rgba(10, 13, 24, 0.55);
+  backdrop-filter: blur(4px);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.cs-eyebrow .cs-pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--cs-accent-solid, #00f0ff);
+  box-shadow: 0 0 12px var(--cs-accent-solid, #00f0ff);
+  animation: cs-pulse 1.6s ease-in-out infinite;
+}
+@keyframes cs-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+.cs-title {
+  font-size: clamp(3.2rem, 9vw, 9rem);
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--cs-fg, #e6f7ff);
+  text-shadow:
+    0 0 8px var(--cs-accent-glow, rgba(0, 240, 255, 0.55)),
+    0 0 28px var(--cs-accent-glow, rgba(0, 240, 255, 0.4)),
+    0 0 80px var(--cs-accent-soft, rgba(138, 43, 255, 0.4));
+  animation: cs-pulse-text 3.6s ease-in-out infinite;
+  will-change: transform, text-shadow;
+  line-height: 1.05;
+}
+@keyframes cs-pulse-text {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.012); }
+}
+
+.cs-subtitle {
+  font-size: clamp(1rem, 1.6vw, 1.6rem);
+  letter-spacing: 0.18em;
+  color: var(--cs-fg-dim, rgba(230, 247, 255, 0.75));
+  max-width: 900px;
+}
+
+/* ----- Glitch headline variant --------------------------- */
+.cs-glitch {
+  position: relative;
+}
+.cs-glitch::before,
+.cs-glitch::after {
+  content: attr(data-text);
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  mix-blend-mode: screen;
+}
+.cs-glitch::before {
+  color: var(--cs-glitch-a, #ff2bd6);
+  transform: translate(-2px, 0);
+  animation: cs-glitch-x 4.8s steps(1) infinite;
+  text-shadow: 0 0 18px rgba(255, 43, 214, 0.55);
+}
+.cs-glitch::after {
+  color: var(--cs-glitch-b, #00f0ff);
+  transform: translate(2px, 0);
+  animation: cs-glitch-y 5.6s steps(1) infinite;
+  text-shadow: 0 0 18px rgba(0, 240, 255, 0.55);
+}
+@keyframes cs-glitch-x {
+  0%, 92%, 100% { transform: translate(0, 0); opacity: 0; }
+  93%           { transform: translate(-4px, 1px); opacity: 0.6; }
+  95%           { transform: translate(3px, -1px); opacity: 0.55; }
+  97%           { transform: translate(-2px, 2px); opacity: 0.5; }
+}
+@keyframes cs-glitch-y {
+  0%, 90%, 100% { transform: translate(0, 0); opacity: 0; }
+  91%           { transform: translate(2px, -2px); opacity: 0.55; }
+  94%           { transform: translate(-3px, 1px); opacity: 0.6; }
+  96%           { transform: translate(1px, 2px); opacity: 0.5; }
+}
+
+/* ----- Countdown ----------------------------------------- */
+.cs-countdown {
+  display: inline-flex;
+  gap: 1.6rem;
+  font-family: "JetBrains Mono", "Segoe UI", monospace;
+  font-variant-numeric: tabular-nums;
+  margin-top: 1rem;
+  padding: 1rem 1.6rem;
+  border: 1px solid rgba(0, 240, 255, 0.25);
+  border-radius: 8px;
+  background: rgba(10, 13, 24, 0.55);
+  backdrop-filter: blur(4px);
+}
+.cs-countdown .cs-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3rem;
+  min-width: 4.5rem;
+}
+.cs-countdown .cs-num {
+  font-size: clamp(2.4rem, 4vw, 3.6rem);
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  color: var(--cs-accent-solid, #00f0ff);
+  text-shadow: 0 0 18px var(--cs-accent-glow, rgba(0, 240, 255, 0.5));
+  line-height: 1;
+}
+.cs-countdown .cs-lbl {
+  font-size: 0.7rem;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: rgba(230, 247, 255, 0.5);
+}
+
+/* ----- Social row (Ending scene) ------------------------ */
+.cs-social {
+  display: flex;
+  gap: 1.2rem;
+  margin-top: 1.6rem;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.cs-social-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.7rem 1.4rem;
+  border: 1px solid rgba(0, 240, 255, 0.3);
+  border-radius: 6px;
+  background: rgba(10, 13, 24, 0.55);
+  backdrop-filter: blur(4px);
+  font-size: 1rem;
+  letter-spacing: 0.06em;
+  color: #e6f7ff;
+}
+.cs-social-item .cs-social-svc {
+  font-size: 0.7rem;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: rgba(230, 247, 255, 0.55);
+  margin-right: 0.25rem;
+}
+
+/* ----- Standalone "tag" badge ---------------------------- */
+.cs-tag {
+  display: inline-block;
+  padding: 0.2rem 0.65rem;
+  font-size: 0.7rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  color: var(--cs-fg-dim, rgba(230, 247, 255, 0.6));
+}
+
+/* ----- Logo ribbon (top-left) ---------------------------- */
+.cs-brand {
+  position: absolute;
+  top: 32px;
+  left: 32px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.7rem;
+  font-size: 0.85rem;
+  letter-spacing: 0.45em;
+  text-transform: uppercase;
+  color: var(--cs-fg-dim, rgba(230, 247, 255, 0.5));
+  text-shadow: 0 0 8px rgba(0, 240, 255, 0.25);
+}
+.cs-brand-logo {
+  height: 44px;
+  width: auto;
+  max-width: 180px;
+  object-fit: contain;
+  /* Subtle glow so a flat PNG logo doesn't sit dead against the
+     dark backdrop. SVG / transparent PNGs benefit most. */
+  filter: drop-shadow(0 0 12px rgba(0, 240, 255, 0.25));
+}
+.cs-brand-name { white-space: nowrap; }
+
+/* ----- Small footer (bottom-right) ----------------------- */
+.cs-corner {
+  position: absolute;
+  bottom: 28px;
+  right: 32px;
+  z-index: 2;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.78rem;
+  letter-spacing: 0.18em;
+  color: rgba(230, 247, 255, 0.4);
+}

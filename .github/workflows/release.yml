@@ -1,0 +1,138 @@
+# =========================================================
+# CacheStream release workflow
+# =========================================================
+# Builds multi-arch (amd64 + arm64) Docker images for both
+# apps and pushes them to GitHub Container Registry.
+#
+# Triggers:
+#   - tag push matching `v*` (e.g. v1.6.0)  → tagged + latest
+#   - workflow_dispatch (manual run)        → only `latest`
+#
+# Images:
+#   ghcr.io/<owner>/cachestream-web:<version> + :latest
+#   ghcr.io/<owner>/cachestream-streamer:<version> + :latest
+#
+# The Pi 4 / Pi 5 / other ARM users get arm64; everyone else
+# gets amd64 transparently via the multi-arch manifest. That's
+# what makes `docker compose --profile ghcr up` work for both.
+# =========================================================
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    strategy:
+      # Build both images in parallel — they're independent.
+      matrix:
+        include:
+          - image: cachestream-web
+            context: ./apps/web
+          - image: cachestream-streamer
+            context: ./apps/streamer
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # QEMU emulates arm64 on the amd64 GitHub runner so we can
+      # build the Pi-bound layer without a self-hosted Pi runner.
+      # Slower than native — typically ~6-8 min for the streamer
+      # image (Chromium install) — but it works on the free tier.
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: linux/amd64,linux/arm64
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Compute the version tag from the git ref. `v1.6.0` → `1.6.0`.
+      # On workflow_dispatch the version is "manual-<sha>".
+      - id: meta
+        name: Compute tags
+        run: |
+          IMAGE="ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}"
+          IMAGE="${IMAGE,,}"   # lowercase — GHCR rejects mixed-case repo names
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            VERSION="${GITHUB_REF#refs/tags/v}"
+            echo "tags=${IMAGE}:${VERSION},${IMAGE}:latest" >> "$GITHUB_OUTPUT"
+          else
+            VERSION="manual-${GITHUB_SHA::7}"
+            echo "tags=${IMAGE}:${VERSION},${IMAGE}:latest" >> "$GITHUB_OUTPUT"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "image=${IMAGE}"     >> "$GITHUB_OUTPUT"
+
+      - name: Build and push ${{ matrix.image }}
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          # Buildx layer cache lives in the GHCR registry next to
+          # the image — survives across runs without us managing a
+          # separate cache bucket.
+          cache-from: type=registry,ref=${{ steps.meta.outputs.image }}:buildcache
+          cache-to:   type=registry,ref=${{ steps.meta.outputs.image }}:buildcache,mode=max
+          # OCI annotations make the GitHub Packages UI show source
+          # links + the release version automatically.
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ steps.meta.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.licenses=MIT
+
+  release:
+    needs: build
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      # Create a GitHub Release for the tag with the body taken
+      # from CHANGELOG.md (if a matching `## X.Y.Z` section exists).
+      - name: Extract release notes from CHANGELOG
+        id: notes
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          if [[ -f CHANGELOG.md ]]; then
+            # Grab from the heading of THIS version down to the next ## heading.
+            awk -v v="$VERSION" '
+              $0 ~ "^## "v"($| )"       { p=1; next }
+              p && /^## [0-9]/          { exit }
+              p                         { print }
+            ' CHANGELOG.md > /tmp/notes.md
+          fi
+          if [[ ! -s /tmp/notes.md ]]; then
+            echo "_No changelog entry — see commits._" > /tmp/notes.md
+          fi
+          {
+            echo "version=${VERSION}"
+            echo "notes<<EOF"
+            cat /tmp/notes.md
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name:     CacheStream ${{ steps.notes.outputs.version }}
+          body:     ${{ steps.notes.outputs.notes }}
+          draft:    false
+          prerelease: false

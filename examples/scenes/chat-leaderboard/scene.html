@@ -1,0 +1,105 @@
+<!--
+  Live top chatters leaderboard. Subscribes to /api/chat/stream
+  and counts messages per user. Re-renders the top N with smooth
+  vertical glide on rank changes.
+-->
+<main class="board">
+  <header>
+    <h1>TOP CHATTERS</h1>
+    <span class="badge"><span class="dot"></span> live</span>
+  </header>
+
+  <ol id="list" class="list"></ol>
+
+  <footer id="stats">0 messages · 0 chatters</footer>
+</main>
+
+<script>
+  const TOP_N = 10;
+  const ROW_H = 56;            // matches .row height in CSS
+  const RESET_AFTER_MIN = 0;   // 0 = never reset
+
+  // login → { name, color, count }
+  const counts = new Map();
+  let totalMsgs = 0;
+  let rendered = new Map();    // login → DOM node
+  const $list  = document.getElementById("list");
+  const $stats = document.getElementById("stats");
+
+  function render() {
+    const ranked = [...counts.values()]
+      .sort((a, b) => b.count - a.count)
+      .slice(0, TOP_N);
+
+    const seen = new Set();
+    ranked.forEach((entry, i) => {
+      seen.add(entry.login);
+      let row = rendered.get(entry.login);
+      if (!row) {
+        row = document.createElement("li");
+        row.className = "row";
+        row.innerHTML = `
+          <span class="rank">#${i + 1}</span>
+          <span class="name"></span>
+          <span class="count">0</span>
+        `;
+        $list.appendChild(row);
+        rendered.set(entry.login, row);
+      }
+      row.querySelector(".rank").textContent = `#${i + 1}`;
+      const $name = row.querySelector(".name");
+      $name.textContent = entry.name;
+      $name.style.color = entry.color || "#00f0ff";
+      row.querySelector(".count").textContent = entry.count.toLocaleString();
+      // CSS transition animates this transform → smooth re-ranking.
+      row.style.transform = `translateY(${i * ROW_H}px)`;
+    });
+
+    // Remove rows that fell off the top N.
+    for (const [login, row] of rendered) {
+      if (!seen.has(login)) {
+        row.remove();
+        rendered.delete(login);
+      }
+    }
+
+    $stats.textContent =
+      `${totalMsgs.toLocaleString()} messages · ${counts.size.toLocaleString()} chatters`;
+  }
+
+  function ingest(ev) {
+    if (ev.type !== "msg" || !ev.login) return;
+    totalMsgs++;
+    const existing = counts.get(ev.login);
+    if (existing) {
+      existing.count++;
+      // Keep the latest colour / display name in case they changed.
+      existing.name  = ev.name  || existing.name;
+      existing.color = ev.color || existing.color;
+    } else {
+      counts.set(ev.login, {
+        login: ev.login,
+        name:  ev.name  || ev.login,
+        color: ev.color || "#00f0ff",
+        count: 1,
+      });
+    }
+    render();
+  }
+
+  if (RESET_AFTER_MIN > 0) {
+    setInterval(() => {
+      counts.clear();
+      totalMsgs = 0;
+      for (const row of rendered.values()) row.remove();
+      rendered.clear();
+      render();
+    }, RESET_AFTER_MIN * 60_000);
+  }
+
+  const es = new EventSource("/api/chat/stream");
+  es.onmessage = (e) => {
+    try { ingest(JSON.parse(e.data)); } catch { /* ignore */ }
+  };
+  // The browser auto-reconnects on transport errors, no extra code needed.
+</script>

@@ -1,0 +1,117 @@
+/**
+ * RPC client for the streamer worker.
+ *
+ * All web → streamer traffic goes through this module so:
+ *   - the bearer token is added consistently
+ *   - errors come back as a uniform { status, body } shape
+ *   - request paths are typed (no scattered string URLs)
+ *
+ * Designed for use ONLY from server-side code (route handlers,
+ * server components). The INTERNAL_API_TOKEN must never reach
+ * the browser.
+ */
+
+import { config } from "./config";
+
+export interface StreamerStatus {
+  state: "idle" | "starting" | "running" | "reconnecting" | "stopping";
+  error: string | null;
+  startedAt: number | null;
+  uptimeMs: number;
+  sceneUrl: string;
+  overlays: unknown[];
+  frameCount: number;
+  lastFrameAt: number | null;
+  twitch: { ingestUrl: string; keyConfigured: boolean };
+  video: {
+    width: number; height: number; fps: number;
+    bitrateKbps: number; codec?: string; preset?: string;
+  };
+  autoProfile?: {
+    category: string;
+    codec: string;
+    codecTag: string;
+    host?: {
+      arch: string; cores: number; cpuModel: string;
+      totalMemGB: number; piModel: string | null;
+      isPi: boolean; isWeakArm: boolean;
+    };
+  } | null;
+  thermal?: {
+    enabled: boolean;
+    state: "normal" | "throttled";
+    lastTempC: number | null;
+    throttleC: number;
+    recoverC: number;
+  } | null;
+  /**
+   * True once FFmpeg's stderr confirms Twitch accepted the RTMP
+   * handshake. False if we've never seen the success markers, or
+   * if we've since seen ingest-dropped markers. A `running` state
+   * with this `false` means we're pushing bytes into the void
+   * (Twitch silently rejected — usually a wrong key or a busted
+   * encoder output).
+   */
+  ingestAccepted?: boolean;
+}
+
+async function call<T>(
+  method: "GET" | "POST",
+  path: string,
+  body?: unknown
+): Promise<T> {
+  const url = `${config.streamer.url}${path}`;
+  const res = await fetch(url, {
+    method,
+    headers: {
+      Authorization: `Bearer ${config.streamer.token}`,
+      ...(body ? { "Content-Type": "application/json" } : {}),
+    },
+    body: body ? JSON.stringify(body) : undefined,
+    // Streamer can take a few seconds to launch Chromium.
+    signal: AbortSignal.timeout(20_000),
+    cache: "no-store",
+  });
+
+  const text = await res.text();
+  let payload: unknown = null;
+  if (text) {
+    try { payload = JSON.parse(text); } catch { payload = text; }
+  }
+  if (!res.ok) {
+    const msg =
+      (payload && typeof payload === "object" && "error" in payload && (payload as any).error) ||
+      `streamer ${method} ${path} failed (${res.status})`;
+    const err = new Error(String(msg)) as Error & { status: number };
+    err.status = res.status;
+    throw err;
+  }
+  return payload as T;
+}
+
+export const streamer = {
+  status:   () => call<StreamerStatus>("GET", "/status"),
+  start:    () => call<StreamerStatus>("POST", "/start"),
+  stop:     () => call<StreamerStatus>("POST", "/stop"),
+  restart:  () => call<StreamerStatus>("POST", "/restart"),
+  setScene: (url: string) =>
+    call<StreamerStatus>("POST", "/scene", { url }),
+  setOverlays: (overlays: unknown[]) =>
+    call<StreamerStatus>("POST", "/overlays", { overlays }),
+  playVod:  (source: { id: string; name: string; kind: "file" | "url"; pathOrUrl: string; loop?: boolean }) =>
+    call<StreamerStatus>("POST", "/vod/play", source),
+  stopVod:  () => call<StreamerStatus>("POST", "/vod/stop"),
+  /**
+   * Update the Twitch stream key + ingest URL at runtime, without
+   * restarting the container. If the stream is currently running
+   * the streamer hot-restarts FFmpeg with the new credentials.
+   */
+  setIngest: (input: { streamKey?: string | null; ingestUrl?: string | null }) =>
+    call<StreamerStatus>("POST", "/ingest", input),
+};
+
+/** Returns null instead of throwing — useful for status polling. */
+export async function tryStatus(): Promise<StreamerStatus | null> {
+  try { return await streamer.status(); }
+  catch { return null; }
+}
