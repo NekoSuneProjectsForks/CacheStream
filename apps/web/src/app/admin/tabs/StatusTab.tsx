@@ -9,6 +9,7 @@ import type {
 } from "@/lib/store";
 import type { StreamerStatus } from "@/lib/streamer-client";
 import { apiJson } from "./util";
+import { SystemUpdateCard } from "./SystemUpdateCard";
 
 interface Props {
   initialStatus: StreamerStatus | null;
@@ -429,6 +430,8 @@ export function StatusTab(props: Props) {
           <button className="btn-primary" disabled={!!busy || !sched.scenePresetId} onClick={addSchedule}>Add</button>
         </div>
       </section>
+
+      <SystemUpdateCard />
     </>
   );
 }

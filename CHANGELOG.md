@@ -1,5 +1,59 @@
 # Changelog
 
+## 1.9.3
+
+One-click updates from the panel.
+
+### What it does
+
+The Status tab gains a **System** card showing the running
+CacheStream version + the latest published GitHub release. When
+a newer version is out, an "Update now" button pulls + rebuilds
++ restarts the containers without you ever needing to SSH in.
+
+### How it works
+
+The web container can't run `docker compose` against itself —
+that would need Docker socket access, which is a much bigger
+blast radius than this feature is worth. Instead the panel
+writes a small marker file to the shared data volume, and a
+host-side systemd watcher (`cachestream-updater.service`) is
+the one that actually runs:
+
+```
+git pull --ff-only
+docker compose pull
+docker compose up -d --build
+```
+
+…then removes the marker. A tail of the updater's log appears
+in the panel under a collapsible "Updater log" section so you
+can see what happened.
+
+### Installing the watcher
+
+One-time on the host:
+
+```
+cd ~/CacheStream
+sudo bash scripts/install-updater.sh
+```
+
+Until that's run, the panel shows the install command instead
+of an "Update" button — failsafe; we never write the marker on
+a host that wouldn't read it.
+
+Uninstall: `sudo bash scripts/install-updater.sh --uninstall`.
+
+### New endpoints
+
+- `GET /api/system/version` — current + latest + update flag.
+  Caches the GitHub call for 5 minutes; safe to poll from the UI.
+- `POST /api/system/update` — writes the marker (412 if the
+  watcher isn't installed).
+- `GET /api/system/update` — current in-flight state + tail of
+  the watcher log.
+
 ## 1.9.2
 
 Build hotfix — the runner-stage `npm install music-metadata`
