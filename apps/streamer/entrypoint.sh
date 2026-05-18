@@ -17,6 +17,20 @@ if [ -d "/app/audio" ]; then
   chmod 0777 /app/audio 2>/dev/null || true
 fi
 
+# Existing FIFOs may have been created by the web container
+# with mkfifo's default 0644 (umask 0022). The streamer user
+# can't open them O_RDWR for the keep-alive trick we use to
+# unblock FFmpeg's O_RDONLY open. Re-chmod here while we still
+# have root, before dropping to the streamer user. Safe to run
+# unconditionally — if the FIFO doesn't exist yet, the chmod
+# silently no-ops and the streamer process creates it later
+# with the explicit `mkfifo -m 666` path.
+for fifo in /app/audio/silence.fifo /app/audio/music.fifo; do
+  if [ -p "$fifo" ]; then
+    chmod 0666 "$fifo" 2>/dev/null || true
+  fi
+done
+
 # ─── INTERNAL_API_TOKEN bootstrap ────────────────────────────
 # If the operator pinned a value in .env, that wins. Otherwise
 # we read from the shared file written by the web container.

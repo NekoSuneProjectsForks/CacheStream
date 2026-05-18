@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.7.4
+
+Hotfix for v1.7.3 — the music.fifo keep-alive open failed with
+`EACCES: permission denied` on hosts where the FIFO was created
+by the web container (different UID) with the default mode 0644.
+FFmpeg still hung on `open(music.fifo, O_RDONLY)` because there
+was no writer.
+
+- **Both entrypoints chmod existing FIFOs to 0666 while still
+  root**, before dropping privileges. Catches FIFOs created by
+  older versions or by the other container.
+- **Web container's `_ensureFifos` uses `mkfifo -m 666`** and
+  re-chmods existing FIFOs to 0666 on every boot.
+
+If your v1.7.3 deploy showed
+`could not open music fifo as keep-alive writer` with
+`EACCES: permission denied`, rebuild with 1.7.4 and it'll work.
+
 ## 1.7.3
 
 Fixes the real cause of "running but no frames at Twitch": the

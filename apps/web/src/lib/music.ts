@@ -385,15 +385,30 @@ class MusicEngine {
   }
 
   private _ensureFifos(): void {
-    for (const path of [SILENCE_FIFO, MUSIC_FIFO]) {
-      if (fs.existsSync(path)) {
-        try { if (fs.statSync(path).isFIFO()) continue; } catch {}
+    for (const p of [SILENCE_FIFO, MUSIC_FIFO]) {
+      if (fs.existsSync(p)) {
+        try {
+          if (fs.statSync(p).isFIFO()) {
+            // Re-chmod in case it was created earlier with a
+            // stricter mode. The streamer container's user must
+            // be able to open it O_RDWR for the keep-alive fd
+            // it holds to unblock FFmpeg's O_RDONLY open.
+            try { fs.chmodSync(p, 0o666); } catch {}
+            continue;
+          }
+        } catch {}
       }
+      // mkfifo -m 666 sets the mode directly, bypassing umask.
+      // We still re-chmod after in case the platform mkfifo
+      // ignores the -m flag (rare, but cheap to be defensive).
       try {
-        const r = spawn("mkfifo", [path]);
-        r.on("error", (err) => { this.lastError = `mkfifo ${path} failed: ${err.message}`; });
+        spawn("mkfifo", ["-m", "666", p]).on("error", (err) => {
+          this.lastError = `mkfifo ${p} failed: ${err.message}`;
+        }).on("exit", () => {
+          try { fs.chmodSync(p, 0o666); } catch {}
+        });
       } catch (err: any) {
-        this.lastError = `mkfifo ${path} failed: ${err.message}`;
+        this.lastError = `mkfifo ${p} failed: ${err.message}`;
       }
     }
   }

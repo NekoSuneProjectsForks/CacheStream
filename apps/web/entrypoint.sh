@@ -21,6 +21,16 @@ if [ -d "/app/audio" ]; then
   chmod 0777 /app/audio 2>/dev/null || true
 fi
 
+# Existing audio FIFOs may have been created by an older boot
+# with the default mkfifo umask (0644), which prevents the
+# streamer (different UID) from opening them O_RDWR. Re-chmod
+# while we're still root, before dropping privileges.
+for fifo in /app/audio/silence.fifo /app/audio/music.fifo; do
+  if [ -p "$fifo" ]; then
+    chmod 0666 "$fifo" 2>/dev/null || true
+  fi
+done
+
 # These are web-only mounts; safe to chown to our user.
 for dir in /app/data /app/media/music /app/media/vods; do
   if [ -d "$dir" ]; then
