@@ -64,6 +64,9 @@ class EventSubClient {
     }
     this.wantOnline = true;
     if (this.state === "connecting" || this.state === "connected") return;
+    // Flip state synchronously before _connect so concurrent
+    // start() calls bail. Same race-class fix as chat.ts.
+    this.state = "connecting";
     this._connect(reconnectUrl);
   }
 

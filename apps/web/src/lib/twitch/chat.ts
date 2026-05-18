@@ -57,6 +57,15 @@ class ChatClient {
     }
     this.wantOnline = true;
     if (this.state === "connecting" || this.state === "connected") return;
+    // Flip state synchronously BEFORE awaiting so concurrent
+    // start() calls (boot + /api/chat/status POST + OAuth callback
+    // all fire near-simultaneously after login) see "connecting"
+    // and bail. Without this, all three would race past the guard
+    // while _connect() is awaiting getAccessToken(), each open
+    // their own WebSocket, and each register their own message
+    // handler on the shared ChatClient — leading to every chat
+    // message being processed 2-3 times.
+    this.state = "connecting";
     await this._connect();
   }
 

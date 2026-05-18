@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.7.6
+
+Fixes a race in the chat + EventSub clients that caused every
+chat message to be processed 2-3 times. Symptom: chat commands
+like `!feed` mutating the pet stats 3x per send; activity feeds
+showing duplicate entries.
+
+- **Chat + EventSub `start()` flip state synchronously** before
+  awaiting `getAccessToken()`. The old guard
+  `if (state === "connecting" || state === "connected") return`
+  was bypassed by concurrent callers (boot, /api/chat/status
+  POST, OAuth callback) because state was set inside the awaited
+  `_connect()` — all three races opened their own WebSocket and
+  each registered an `on("message")` handler on the same client,
+  multiplying every incoming message by the race count.
+
 ## 1.7.5
 
 The streamer-side keep-alive fd alone (v1.7.3) wasn't enough to
