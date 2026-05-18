@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.7.2
+
+Fixes the Status badge that stayed red on `RUNNING · NOT ON
+TWITCH` even when the broadcast was healthy and Twitch was
+accepting frames.
+
+- **`ingestAccepted` is now time-based, not regex-based.** The
+  old detection grepped FFmpeg stderr for `Output #0` / `Stream
+  mapping:`, but those lines only appear at `-loglevel info`.
+  CacheStream runs FFmpeg at `-loglevel warning` by default, so
+  the flag never flipped to true and the panel never showed
+  `LIVE on twitch` — even with thousands of frames pushed.
+- Replacement: if FFmpeg is still running 8 s after spawn
+  without having logged a rejection-shaped error (connection
+  refused, broken pipe, `av_interleaved_write_frame`, etc.),
+  the stream is treated as accepted. Twitch closes the TCP
+  socket within ~5 s if it's going to reject, so the 8 s window
+  is well past any realistic reject path.
+- Rejection patterns still flip `ingestAccepted` back to false
+  if they show up after the grace window — the panel will
+  re-redden on a mid-stream drop.
+
 ## 1.7.1
 
 Fixes the boot-loop introduced by v1.7.0's `.env` slim-down.

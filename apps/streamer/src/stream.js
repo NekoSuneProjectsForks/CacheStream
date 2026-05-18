@@ -544,12 +544,33 @@ class Streamer extends EventEmitter {
     let hwEncoderFailed = false;
     const hwFailurePatterns = /v4l2|video11|h264_v4l2m2m|h264_nvenc|h264_qsv|cannot open codec|cannot open device|operation not permitted|no such device/i;
 
-    // Patterns from FFmpeg stderr that confirm RTMP handshake +
-    // mapping completed. These only appear once Twitch has actually
-    // accepted the connection — they're how we tell the panel
-    // "broadcasting" vs "pushing into the void".
-    const ingestOkPatterns = /Output #0|Stream mapping:|Press \[q\]/i;
-    const ingestFailPatterns = /Connection refused|Server returned|Cannot push|Broken pipe|RTMP_Connect.*failed|Unable to find a suitable output format|av_interleaved_write_frame/i;
+    // ── Twitch ingest accept/reject signal ──────────────────────
+    //
+    // We want the panel badge to flip from "encoding" to "ingest
+    // accepted" only after Twitch confirms it took our RTMP
+    // connection. The earlier approach was to grep for `Output #0`
+    // in FFmpeg stderr — but at our default loglevel=warning,
+    // FFmpeg never prints that line. The flag was permanently
+    // false even on a healthy broadcast.
+    //
+    // Replacement: time-based. Twitch closes the TCP socket within
+    // ~5s if it's going to reject (wrong key, duplicate session,
+    // etc.). If FFmpeg is still running at INGEST_GRACE_MS without
+    // having logged a rejection-shaped error, we treat that as
+    // acceptance. Simple, robust across ffmpeg log levels.
+    const INGEST_GRACE_MS = 8000;
+    const ingestFailPatterns = /Connection refused|Server returned|Cannot push|Broken pipe|RTMP_Connect.*failed|Unable to find a suitable output format|av_interleaved_write_frame|Input\/output error|End of file/i;
+
+    const ingestGraceTimer = setTimeout(() => {
+      // Still here after the grace window → Twitch accepted.
+      // Only fire if ffmpeg hasn't already been declared dropped.
+      if (this.ffmpeg && !this.ingestAccepted) {
+        this.ingestAccepted = true;
+        this.logger.info({ afterMs: INGEST_GRACE_MS }, "twitch ingest accepted the stream");
+      }
+    }, INGEST_GRACE_MS);
+    // Cancel the grace timer if ffmpeg dies inside the window.
+    this.ffmpeg.once("exit", () => clearTimeout(ingestGraceTimer));
 
     // Redact the stream key from anywhere it might appear in FFmpeg's
     // stderr — e.g. URL echoes on error like
@@ -569,10 +590,6 @@ class Streamer extends EventEmitter {
       else if (verbose) this.logger.info({ ffmpeg: line }, "ffmpeg");
       else              this.logger.debug({ ffmpeg: line }, "ffmpeg");
 
-      if (!this.ingestAccepted && ingestOkPatterns.test(line)) {
-        this.ingestAccepted = true;
-        this.logger.info("twitch ingest accepted the stream");
-      }
       if (this.ingestAccepted && ingestFailPatterns.test(line)) {
         this.ingestAccepted = false;
         this.logger.warn({ line }, "twitch ingest dropped the stream");
