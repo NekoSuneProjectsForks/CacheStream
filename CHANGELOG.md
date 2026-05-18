@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.7.3
+
+Fixes the real cause of "running but no frames at Twitch": the
+streamer's FFmpeg was hanging forever on the music FIFO open.
+
+- **Streamer holds music.fifo open O_RDWR for FFmpeg's lifetime.**
+  FFmpeg's `-f s16le -i music.fifo` opens the FIFO O_RDONLY,
+  which blocks on Linux until a writer exists. The music engine
+  (web container) only writes to music.fifo while a track is
+  playing — so on a fresh start with no music queued, FFmpeg
+  hung on `open()` and never reached the encode / RTMP stage.
+  The TCP socket to Twitch was never opened. Twitch's Stream
+  Health page correctly showed `Offline` with zero bitrate even
+  though our internal `frameCount` kept climbing (counts MJPEG
+  frames arriving from Chromium, not frames actually published).
+- Fix: the streamer opens music.fifo O_RDWR|O_NONBLOCK itself
+  before spawning FFmpeg and holds the fd until the FFmpeg
+  process exits. RDWR counts as a writer, so FFmpeg's RDONLY
+  open returns immediately. We never write into the fd; the
+  real music engine is still the only producer of audio data.
+  When music is idle, amix in the filter graph reads nothing
+  from music.fifo and falls back to silence.fifo as designed.
+
+If you upgraded straight to 1.7.x and the broadcast went yellow
+`ENCODING · WAITING FOR TWITCH` but Twitch's dashboard stayed
+`Offline` with no bitrate, this is the fix.
+
 ## 1.7.2
 
 Fixes the Status badge that stayed red on `RUNNING · NOT ON

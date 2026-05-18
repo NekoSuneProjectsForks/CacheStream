@@ -177,6 +177,7 @@ class Streamer extends EventEmitter {
     this.page = null;
     this.client = null;
     this.ffmpeg = null;
+    this.musicFifoFd = null;
 
     this.restartTimer = null;
     this.shouldRun = false; // user intent — survives reconnects
@@ -468,6 +469,28 @@ class Streamer extends EventEmitter {
     const silenceFifo = process.env.SILENCE_FIFO_PATH || "/app/audio/silence.fifo";
     const musicFifo   = process.env.MUSIC_FIFO_PATH   || "/app/audio/music.fifo";
 
+    // ── FIFO open-blocking fix ──────────────────────────────────
+    // FFmpeg's `-f s16le -i <fifo>` opens the FIFO O_RDONLY. On
+    // Linux, opening a FIFO O_RDONLY blocks until at least one
+    // writer exists. silence.fifo always has a writer (the web
+    // container's silence filler), so it opens immediately.
+    // music.fifo only has a writer while a track is playing —
+    // when idle, FFmpeg hangs forever on open() of music.fifo,
+    // never gets to the encode/output stage, never reaches Twitch.
+    //
+    // Fix: we (the streamer) open music.fifo O_RDWR ourselves and
+    // hold the fd open for FFmpeg's lifetime. RDWR counts as a
+    // writer, so FFmpeg's RDONLY open returns instantly. We never
+    // actually write anything; the real music engine writes when
+    // a track plays. amix in the filter graph treats our empty
+    // read side as "no data" and falls back to silence.fifo.
+    try {
+      this.musicFifoFd = fs.openSync(musicFifo, fs.constants.O_RDWR | fs.constants.O_NONBLOCK);
+    } catch (err) {
+      this.logger.warn({ err: err.message, musicFifo }, "could not open music fifo as keep-alive writer");
+      this.musicFifoFd = null;
+    }
+
     // FFmpeg loglevel — env-overridable for diagnostics. Set
     // STREAM_FFMPEG_LOGLEVEL=verbose (or info) to see the RTMP
     // handshake and Twitch's responses; default warning keeps
@@ -602,6 +625,14 @@ class Streamer extends EventEmitter {
 
     this.ffmpeg.on("exit", (code, signal) => {
       this.logger.warn({ code, signal, codec: video.codec }, "ffmpeg exited");
+
+      // Release our music.fifo keep-alive fd so a fresh ffmpeg
+      // gets a clean re-open on reconnect. _spawnFFmpeg will
+      // re-open it before the next process starts.
+      if (this.musicFifoFd != null) {
+        try { fs.closeSync(this.musicFifoFd); } catch {}
+        this.musicFifoFd = null;
+      }
 
       // Hardware-encoder runtime fallback. If the HW encoder couldn't
       // open its device, libx264 is always available — switch to it
@@ -923,6 +954,10 @@ class Streamer extends EventEmitter {
         proc.once("exit", () => { clearTimeout(killTimer); resolve(); });
         try { proc.kill("SIGTERM"); } catch { resolve(); }
       });
+    }
+    if (this.musicFifoFd != null) {
+      try { fs.closeSync(this.musicFifoFd); } catch {}
+      this.musicFifoFd = null;
     }
     if (this.page) {
       try { await this.page.close({ runBeforeUnload: false }); } catch {}
