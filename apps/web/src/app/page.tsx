@@ -1,19 +1,24 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { getBranding } from "@/lib/branding";
+import { isSetupComplete } from "@/lib/settings";
 
 /**
  * Public landing page. Two CTAs:
  *   1. View the scene that's currently being streamed.
  *   2. Log in to the admin control panel.
  *
- * Intentionally minimal — nobody but the operator should
- * spend time here. The branding (display name, logo, tagline,
- * accent colour) flows in from the kv-backed branding store
- * so it stays consistent with the broadcast.
+ * Fresh deploys (setup wizard not completed) are redirected to
+ * /setup. Once the wizard is done this becomes the normal landing.
+ *
+ * Branding (display name, logo, tagline, accent) flows in from the
+ * kv-backed branding store so it stays consistent with the broadcast.
  */
 export const dynamic = "force-dynamic";
 
 export default function Landing() {
+  if (!isSetupComplete()) redirect("/setup");
+
   const b = getBranding();
   const accent = b.accent || "#00f0ff";
 

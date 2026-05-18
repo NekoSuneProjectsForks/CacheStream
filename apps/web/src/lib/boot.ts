@@ -24,6 +24,7 @@ import { startEventSub } from "./twitch/eventsub";
 import { pet } from "./games/pet";
 import { datacenter } from "./games/datacenter";
 import { pushIngestToStreamer } from "./twitchIngest";
+import { musicEngine } from "./music";
 
 let booted = false;
 
@@ -35,6 +36,16 @@ export function bootOnce(): void {
   // bus during init(), so they must be alive BEFORE chat connects.
   try { pet(); } catch (err) { console.warn("[boot] pet init:", err); }
   try { datacenter(); } catch (err) { console.warn("[boot] datacenter init:", err); }
+
+  // CRITICAL: the music engine's constructor spawns the always-on
+  // "silence filler" FFmpeg that writes silent PCM into the
+  // silence FIFO. The streamer's main FFmpeg blocks on FIFO open
+  // until something is writing to it — without the filler, the
+  // streamer hangs after parsing its inputs and never reaches
+  // the RTMP handshake. Calling musicEngine() here forces the
+  // singleton to construct + start the filler at server boot,
+  // not lazily on the first /api/music/* request.
+  try { musicEngine(); } catch (err) { console.warn("[boot] music engine init:", err); }
 
   const store = getStore();
   const tokens = store.getTokens();

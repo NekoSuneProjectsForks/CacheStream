@@ -1,5 +1,70 @@
 # Changelog
 
+## 1.7.0
+
+The "you should never have to touch .env again" release.
+
+### Setup wizard
+
+- New first-run wizard at **`/setup`**. Fresh deploys with no
+  config automatically redirect there from `/` and `/admin`.
+- Three steps: PUBLIC_URL preflight, Twitch developer app
+  (client id + secret, with copy-paste-friendly OAuth redirect),
+  and login. The wizard self-resumes where you left off if
+  interrupted between steps.
+- `SESSION_SECRET` is auto-generated on first boot — no more
+  `openssl rand -hex 48` ritual.
+- Setup state is persisted to SQLite (kv) so a container restart
+  doesn't re-trigger the wizard.
+
+### Twitch stream key — pulled from OAuth, not pasted
+
+- New `channel:read:stream_key` scope on the OAuth login.
+- On every successful login, the panel auto-fetches the current
+  stream key via Helix and hot-loads it into the streamer. No
+  more `.env` editing when you rotate the key on Twitch.
+- "Fetch from Twitch" button in Stream Info → Stream key & ingest
+  for manual refresh after a Twitch-side rotation.
+
+### Real "are we live on Twitch" check
+
+- New `GET /api/twitch/live` route polls Helix `GET /streams` for
+  the broadcaster's actual public live status.
+- Status badge is now three-state:
+  - 🟢 **LIVE on twitch** — encoding + ingest accepted + Helix
+    confirms the channel is visible.
+  - 🟡 **encoding · waiting for twitch** — pushing bytes, ingest
+    ACK'd, but Helix doesn't see the channel yet (propagation
+    or silent reject).
+  - 🔴 **running · not on twitch** — FFmpeg pushing, Twitch
+    silently rejected at the RTMP layer (wrong key, duplicate
+    session).
+- Twitch viewer count + title surface as additional metrics when
+  live.
+
+### `.env` slimmed down
+
+The example file is now ~30 lines. Only `PUBLIC_URL` is truly
+required pre-wizard. Everything else has been moved to the panel:
+OAuth credentials, session secret, stream key, ingest URL, all
+encoder knobs, runtime behaviour.
+
+Existing v1.6 `.env` deployments keep working unchanged — the
+settings layer cascades `kv → .env → default`, so anything you
+had in `.env` before is still picked up.
+
+### Migration from v1.6
+
+1. Pull v1.7.0, rebuild containers.
+2. If your `.env` has `TWITCH_CLIENT_ID` set, the wizard is
+   automatically considered complete and you go straight to
+   `/admin` as before.
+3. If you want the fresh-install experience: delete the OAuth
+   vars from `.env`, restart the web container, visit `/` — the
+   wizard will walk you through it.
+4. To re-run the wizard later (e.g. rotate the dev app secret),
+   visit `/setup?force=1`.
+
 ## 1.6.0
 
 A reliability + portability release. Boots clean on a Raspberry

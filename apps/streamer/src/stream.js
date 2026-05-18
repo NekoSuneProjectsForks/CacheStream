@@ -468,9 +468,15 @@ class Streamer extends EventEmitter {
     const silenceFifo = process.env.SILENCE_FIFO_PATH || "/app/audio/silence.fifo";
     const musicFifo   = process.env.MUSIC_FIFO_PATH   || "/app/audio/music.fifo";
 
+    // FFmpeg loglevel — env-overridable for diagnostics. Set
+    // STREAM_FFMPEG_LOGLEVEL=verbose (or info) to see the RTMP
+    // handshake and Twitch's responses; default warning keeps
+    // the steady-state log clean.
+    const ffmpegLogLevel = process.env.STREAM_FFMPEG_LOGLEVEL || "warning";
+
     const args = [
       "-hide_banner",
-      "-loglevel", "warning",
+      "-loglevel", ffmpegLogLevel,
       "-nostats",
 
       // Input 0: MJPEG frames over stdin
@@ -555,8 +561,13 @@ class Streamer extends EventEmitter {
       const line = redact(chunk.toString().trim());
       if (!line) return;
       const isError = /error|failed|cannot|invalid/i.test(line);
-      if (isError) this.logger.warn({ ffmpeg: line }, "ffmpeg");
-      else         this.logger.debug({ ffmpeg: line }, "ffmpeg");
+      // When STREAM_FFMPEG_LOGLEVEL is non-default, surface every
+      // line at info — otherwise diagnostics get swallowed by pino's
+      // default debug-suppression.
+      const verbose = ffmpegLogLevel !== "warning" && ffmpegLogLevel !== "error" && ffmpegLogLevel !== "fatal";
+      if (isError)      this.logger.warn({ ffmpeg: line }, "ffmpeg");
+      else if (verbose) this.logger.info({ ffmpeg: line }, "ffmpeg");
+      else              this.logger.debug({ ffmpeg: line }, "ffmpeg");
 
       if (!this.ingestAccepted && ingestOkPatterns.test(line)) {
         this.ingestAccepted = true;
@@ -846,9 +857,19 @@ class Streamer extends EventEmitter {
       process.env.MUSIC_FIFO_PATH   || "/app/audio/music.fifo",
     ];
     for (const fifo of fifos) {
+      // If the FIFO exists, leave it alone — but make sure it's
+      // world-writable so the web container's user (different UID
+      // than ours) can also open it for writing. v1.6 shipped with
+      // mkfifo's default 0644 which silently broke music: the
+      // streamer (creator) could read+write but the web container
+      // (writer) got EACCES on open. Always re-chmod here so a
+      // stale FIFO from an older deploy gets fixed.
       try {
         const stat = fs.statSync(fifo);
-        if (stat.isFIFO()) continue;
+        if (stat.isFIFO()) {
+          try { fs.chmodSync(fifo, 0o666); } catch {}
+          continue;
+        }
         // Path exists but isn't a FIFO — replace it.
         fs.unlinkSync(fifo);
       } catch (err) {
@@ -859,10 +880,14 @@ class Streamer extends EventEmitter {
       try {
         fs.mkdirSync(path.dirname(fifo), { recursive: true });
       } catch {}
-      const r = spawnSync("mkfifo", [fifo]);
+      // mkfifo -m 666 → world rw, no execute (FIFOs don't need it).
+      // Honours umask, so we follow up with an explicit chmod.
+      const r = spawnSync("mkfifo", ["-m", "666", fifo]);
       if (r.status !== 0) {
         this.logger.warn({ fifo, stderr: r.stderr?.toString() }, "mkfifo failed");
+        continue;
       }
+      try { fs.chmodSync(fifo, 0o666); } catch {}
     }
   }
 

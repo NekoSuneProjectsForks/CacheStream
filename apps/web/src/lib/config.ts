@@ -44,34 +44,67 @@ const publicUrl = (optional("PUBLIC_URL", `http://localhost:${port}`)).replace(
   ""
 );
 
+// OAuth scopes — declared once, used by buildAuthorizeUrl + the
+// missing-scopes detector. Kept at module scope so it can be
+// imported without going through the dynamic resolver below.
+export const OAUTH_SCOPES = [
+  "user:read:email",
+  "channel:manage:broadcast",
+  "channel:read:subscriptions",
+  // Lets the panel fetch the broadcaster's current stream key
+  // from Helix (GET /streams/key) — kills the manual paste-from-
+  // dashboard workflow that has been a recurring source of
+  // "Twitch is OFFLINE" bugs (stale .env, wrong key, etc.).
+  "channel:read:stream_key",
+  "bits:read",
+  "moderation:read",
+  "moderator:manage:banned_users",
+  "moderator:manage:chat_messages",
+  "moderator:read:followers",
+  "chat:read",
+  "chat:edit",
+] as const;
+
+/**
+ * OAuth credentials are now wizard-managed (stored in SQLite kv).
+ * Reading them happens at REQUEST time, not module-load time, so
+ * a fresh wizard save is picked up immediately by any subsequent
+ * OAuth / Helix call without restarting the container.
+ *
+ * Use this in route handlers instead of `config.oauth`.
+ */
+export function oauthSettings() {
+  // Lazy import: settings.ts opens the SQLite db on first import,
+  // and we don't want config.ts (loaded at boot) to touch the db
+  // before instrumentation.ts has had a chance to run migrations.
+  const { getSetting, getOrCreateSessionSecret } = require("./settings") as
+    typeof import("./settings");
+  return {
+    clientId:      getSetting("twitch_client_id"),
+    clientSecret:  getSetting("twitch_client_secret"),
+    sessionSecret: getOrCreateSessionSecret(),
+    redirectUri:   `${publicUrl}/api/auth/twitch/callback`,
+    scopes:        OAUTH_SCOPES as unknown as string[],
+    initialOwnerLogin: optional("INITIAL_OWNER_LOGIN").toLowerCase() || null,
+  };
+}
+
 export const config = {
   web: {
     port,
     publicUrl,
     trustProxy: toBool(process.env.TRUST_PROXY, false),
   },
-  oauth: {
-    clientId:     safeRequired("TWITCH_CLIENT_ID", "build-placeholder"),
-    clientSecret: safeRequired("TWITCH_CLIENT_SECRET", "build-placeholder"),
-    sessionSecret: safeRequired("SESSION_SECRET", "build-placeholder-build-placeholder-build-placeholder-build-placeholder"),
-    redirectUri: `${publicUrl}/api/auth/twitch/callback`,
-    // v1.2 scopes — broadcaster management, chat, mod actions,
-    // EventSub subscriptions. Anyone with a v1.1 session is
-    // missing most of these; we detect that and force re-login.
-    scopes: [
-      "user:read:email",
-      "channel:manage:broadcast",
-      "channel:read:subscriptions",
-      "bits:read",
-      "moderation:read",
-      "moderator:manage:banned_users",
-      "moderator:manage:chat_messages",
-      "moderator:read:followers",
-      "chat:read",
-      "chat:edit",
-    ],
-    initialOwnerLogin: optional("INITIAL_OWNER_LOGIN").toLowerCase() || null,
-  },
+  /**
+   * @deprecated — prefer `oauthSettings()`. Kept for the few callers
+   * that still read static config at module load time (Cookie HMAC
+   * keys, etc.); they get the kv value via the same fallback.
+   *
+   * Note: this getter still uses the lazy require, so it works for
+   * pre-wizard deployments where kv may not yet exist (the wizard
+   * generates SESSION_SECRET on first read).
+   */
+  get oauth() { return oauthSettings(); },
   streamer: {
     url: optional("STREAMER_URL", "http://streamer:7789").replace(/\/+$/, ""),
     token: safeRequired("INTERNAL_API_TOKEN", "build-placeholder"),

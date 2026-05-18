@@ -9,7 +9,7 @@ import {
 } from "@/lib/cookies";
 import { getStore } from "@/lib/store";
 import { config } from "@/lib/config";
-import { onTokensRefreshed } from "@/lib/twitch/tokens";
+import { onTokensRefreshed, markRefreshTokenAlive } from "@/lib/twitch/tokens";
 
 /**
  * GET /api/auth/twitch/callback?code=...&state=...
@@ -85,12 +85,57 @@ export async function GET(req: NextRequest) {
     updatedAt: Date.now(),
   });
 
+  // Clear any "refresh token dead" flag set during a previous
+  // session — these tokens are fresh and will work.
+  markRefreshTokenAlive();
+
   // Fire-and-forget hook so the chat + EventSub clients can pick
   // up the new tokens immediately rather than wait for first use.
   try { await onTokensRefreshed(); } catch (err) { console.warn("[oauth] post-token hook:", err); }
 
+  // Auto-pull the broadcaster's current stream key from Helix and
+  // push it to the streamer. Run async so the redirect to /admin
+  // isn't blocked — the result is visible in the Stream Info card
+  // by the time the operator gets there.
+  //
+  // We do this on every callback (login OR re-auth) because the
+  // broadcaster may have rotated their key on Twitch since their
+  // last login. Fresh key every time = no stale-key surprises.
+  if (token.scope?.includes("channel:read:stream_key")) {
+    (async () => {
+      try {
+        const { fetchStreamKey } = await import("@/lib/twitch/helix");
+        const { setIngest } = await import("@/lib/twitchIngest");
+        const k = await fetchStreamKey(user.id);
+        if (k) {
+          await setIngest({ streamKey: k });
+          console.log("[oauth] auto-fetched stream key from Helix");
+        }
+      } catch (err) {
+        console.warn("[oauth] auto-fetch stream key failed:", err);
+      }
+    })();
+  }
+
+  // If this login originated from the setup wizard, mark setup
+  // complete and clear the origin cookie. The /admin redirect
+  // below is unchanged either way — the wizard's gate (in
+  // /setup/page.tsx) will start sending fresh hits to /admin once
+  // it sees `isSetupComplete()` flip true.
+  const originSigned = req.cookies.get("cs_oauth_origin")?.value;
+  const origin = unsign(originSigned);
+  if (origin === "setup") {
+    try {
+      const { markSetupComplete } = await import("@/lib/settings");
+      markSetupComplete();
+    } catch (err) {
+      console.warn("[oauth] markSetupComplete failed:", err);
+    }
+  }
+
   const res = NextResponse.redirect(`${config.web.publicUrl}/admin`);
   res.cookies.delete(STATE_COOKIE);
+  res.cookies.delete("cs_oauth_origin");
   res.cookies.set(
     SESSION_COOKIE,
     sign(sid),

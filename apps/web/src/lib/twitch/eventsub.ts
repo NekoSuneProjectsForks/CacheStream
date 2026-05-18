@@ -20,7 +20,7 @@
 import WebSocket from "ws";
 import { config } from "../config";
 import { getStore } from "../store";
-import { getAccessToken } from "./tokens";
+import { getAccessToken, isRefreshTokenDead } from "./tokens";
 import { publish } from "../bus";
 
 const EVENTSUB_URL = "wss://eventsub.wss.twitch.tv/ws";
@@ -54,6 +54,14 @@ class EventSubClient {
   }
 
   async start(reconnectUrl?: string): Promise<void> {
+    // If the stored refresh token is already known-dead, don't even
+    // open a websocket — we'd just session_welcome → subscribe →
+    // 400 in a loop. The operator needs to re-login first.
+    if (isRefreshTokenDead()) {
+      this.lastError = "refresh token rejected by Twitch — re-login required";
+      this.state = "closed";
+      return;
+    }
     this.wantOnline = true;
     if (this.state === "connecting" || this.state === "connected") return;
     this._connect(reconnectUrl);
@@ -142,7 +150,22 @@ class EventSubClient {
   private async _subscribeAll(): Promise<void> {
     const tokens = getStore().getTokens();
     if (!tokens || !this.sessionId) return;
-    const token = await getAccessToken();
+    let token: string;
+    try {
+      token = await getAccessToken();
+    } catch (err: any) {
+      // Refresh failed (commonly: refresh token revoked, expired
+      // beyond grace, or client secret rotated). Stop trying —
+      // every retry will hit the same wall and spam the log.
+      this.lastError = err?.message || String(err);
+      this.wantOnline = false;
+      if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
+      try { this.ws?.close(); } catch {}
+      this.ws = null;
+      this.state = "closed";
+      console.warn("[eventsub] giving up:", this.lastError);
+      return;
+    }
     const broadcasterId = tokens.twitchUserId;
 
     for (const sub of SUBSCRIPTIONS) {

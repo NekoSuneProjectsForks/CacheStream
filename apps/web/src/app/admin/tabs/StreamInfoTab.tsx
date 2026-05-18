@@ -243,6 +243,33 @@ function StreamKeyCard() {
     finally { setBusy(null); }
   };
 
+  // Fetch the current stream key from Twitch directly using the
+  // stored OAuth token. No manual copy/paste — eliminates the
+  // class of bugs where the key in .env / dashboard / Twitch are
+  // out of sync.
+  const fetchFromTwitch = async () => {
+    setBusy("fetch"); setError(null);
+    try {
+      const data = await apiJson("/api/twitch/ingest/fetch-key", { method: "POST" });
+      // Endpoint returns the same shape as the regular GET plus
+      // a `fetched: true` flag — reuse it as the local snapshot.
+      setSnap((prev) => ({
+        ...(prev as IngestSnap),
+        ...data,
+      }));
+      setInfo("Pulled current key from Twitch. Broadcast reconnects in ~5 s if it was live.");
+    } catch (e: any) {
+      // The endpoint returns 412 with a missingScopes payload if
+      // the operator's token predates v1.6.1. Tell them to re-auth.
+      if (/missing channel:read:stream_key/i.test(e.message)) {
+        setError("Your login is missing the channel:read:stream_key scope. Re-authorize via the Chat tab, then try again.");
+      } else {
+        setError(e.message);
+      }
+    }
+    finally { setBusy(null); }
+  };
+
   const usingKv = snap?.source.streamKey === "kv";
   const usingEnv = !usingKv && snap?.streamerKeyConfigured;
   const tagText = usingKv ? "dashboard" : usingEnv ? "from .env" : "missing";
@@ -323,14 +350,22 @@ function StreamKeyCard() {
       <div className="actions" style={{ marginTop: "1rem" }}>
         <button
           className="btn-primary"
+          disabled={!!busy}
+          onClick={fetchFromTwitch}
+          title="Pull the current key from Twitch using your OAuth login. No copy/paste."
+        >
+          {busy === "fetch" ? "Fetching…" : "Fetch from Twitch"}
+        </button>
+        <button
+          className="btn-ghost"
           disabled={!!busy || (keyDraft.length === 0 && urlDraft === (snap?.ingestUrl || ""))}
           onClick={save}
         >
-          {busy === "save" ? "Saving…" : "Save"}
+          {busy === "save" ? "Saving…" : "Save manual entry"}
         </button>
         {usingKv && (
           <button className="btn-ghost" disabled={!!busy} onClick={clearKey}>
-            {busy === "clear" ? "Clearing…" : "Clear dashboard key"}
+            {busy === "clear" ? "Clearing…" : "Clear"}
           </button>
         )}
         <button className="btn-ghost" disabled={!!busy} onClick={load}>Reload</button>

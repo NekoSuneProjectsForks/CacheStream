@@ -17,7 +17,7 @@
 
 import WebSocket from "ws";
 import { getStore } from "../store";
-import { getAccessToken } from "./tokens";
+import { getAccessToken, isRefreshTokenDead } from "./tokens";
 import { publish } from "../bus";
 import { runCommandIfMatch } from "../commands";
 import { evaluateAutoMod } from "../automod";
@@ -50,6 +50,11 @@ class ChatClient {
   }
 
   async start(): Promise<void> {
+    if (isRefreshTokenDead()) {
+      this.lastError = "refresh token rejected by Twitch — re-login required";
+      this.state = "closed";
+      return;
+    }
     this.wantOnline = true;
     if (this.state === "connecting" || this.state === "connected") return;
     await this._connect();
@@ -90,7 +95,20 @@ class ChatClient {
 
     let token: string;
     try { token = await getAccessToken(); }
-    catch (err: any) { this.lastError = err.message; this._scheduleReconnect(); return; }
+    catch (err: any) {
+      this.lastError = err.message;
+      // If the refresh token is dead, do NOT schedule a reconnect —
+      // every attempt will fail the same way. The operator has to
+      // re-login; after that, oauth callback calls reconnectChatIfRunning.
+      if (isRefreshTokenDead()) {
+        this.wantOnline = false;
+        this.state = "closed";
+        console.warn("[chat] giving up:", err.message);
+        return;
+      }
+      this._scheduleReconnect();
+      return;
+    }
 
     this.channel = owner.twitchLogin.toLowerCase();
     this.state = "connecting";

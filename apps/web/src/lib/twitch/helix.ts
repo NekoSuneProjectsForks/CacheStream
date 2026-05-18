@@ -141,6 +141,26 @@ export async function getStreamByUserId(userId: string): Promise<StreamInfo | nu
   return res.data?.[0] ?? null;
 }
 
+/**
+ * Fetch the broadcaster's primary stream key from Helix.
+ *
+ *   GET https://api.twitch.tv/helix/streams/key?broadcaster_id=<id>
+ *
+ * Requires the `channel:read:stream_key` OAuth scope. Returns the
+ * raw key (e.g. `live_1499808986_…`) — handle carefully and never
+ * return it to the browser directly.
+ *
+ * Twitch rotates this key whenever the broadcaster clicks "Reset"
+ * in their dashboard, so callers should re-fetch on demand rather
+ * than caching indefinitely.
+ */
+export async function fetchStreamKey(broadcasterId: string): Promise<string | null> {
+  const res = await helix<{ data: Array<{ stream_key: string }> }>("GET", "/streams/key", {
+    query: { broadcaster_id: broadcasterId },
+  });
+  return res.data?.[0]?.stream_key || null;
+}
+
 // ---- Chat moderation -------------------------------------------
 
 /** Delete a single chat message by id. */

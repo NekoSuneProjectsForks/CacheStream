@@ -30,6 +30,14 @@ const POLL_INTERVAL_MS = 5_000;
  */
 export function StatusTab(props: Props) {
   const [status, setStatus] = useState<StreamerStatus | null>(props.initialStatus);
+  // Twitch's own view of "are we live" — independent of the
+  // streamer's "I'm pushing bytes" state. Fetched on the same
+  // cadence as the status poll below.
+  const [liveCheck, setLiveCheck] = useState<{
+    liveOnTwitch: boolean;
+    reason: string;
+    stream: { startedAt: string; viewerCount: number; title: string; game: string } | null;
+  } | null>(null);
   const [scenes, setScenes] = useState<ScenePreset[]>(props.initialScenes);
   const [overlaySets, setOverlaySets] = useState<OverlaySet[]>(props.initialOverlaySets);
   const [activeOverlayId, setActiveOverlayId] = useState<string | null>(props.initialActiveOverlayId);
@@ -41,12 +49,18 @@ export function StatusTab(props: Props) {
     let cancelled = false;
     const tick = async () => {
       try {
-        const r = await fetch("/api/stream/status", { cache: "no-store" });
-        if (!r.ok) return;
-        const data = await r.json();
-        if (!cancelled) setStatus(data.status);
+        const [s, l] = await Promise.all([
+          fetch("/api/stream/status",   { cache: "no-store" }).then((r) => r.ok ? r.json() : null),
+          // /api/twitch/live can 502 if Helix is down; that's fine,
+          // we just keep the previous value rather than flapping.
+          fetch("/api/twitch/live",     { cache: "no-store" }).then((r) => r.ok ? r.json() : null),
+        ]);
+        if (cancelled) return;
+        if (s) setStatus(s.status);
+        if (l) setLiveCheck(l);
       } catch {}
     };
+    tick();
     const id = setInterval(tick, POLL_INTERVAL_MS);
     return () => { cancelled = true; clearInterval(id); };
   }, []);
@@ -170,25 +184,39 @@ export function StatusTab(props: Props) {
     });
 
   // ---- Derived ----------------------------------------------
+  // The badge collapses three signals into one colour:
+  //   - status.state          (idle / running / reconnecting / etc.)
+  //   - status.ingestAccepted (FFmpeg confirmed Twitch ACK'd RTMP)
+  //   - liveCheck.liveOnTwitch (Helix says the channel is live)
+  //
+  // All three green → broadcast really is on Twitch.
+  // FFmpeg says yes but Twitch /streams says no → red, with a hint.
+  // FFmpeg says yes AND Twitch says yes → solid green LIVE.
   const stateColor = useMemo(() => {
     switch (status?.state) {
-      // "running" with ingestAccepted=false means we're encoding
-      // but Twitch silently dropped us — usually wrong key or
-      // busted encoder output. Surface as error, not OK.
-      case "running":      return status?.ingestAccepted === false ? "err" : "ok";
+      case "running":
+        if (status.ingestAccepted === false)        return "err";
+        if (liveCheck && liveCheck.liveOnTwitch)    return "ok";
+        // Encoding fine, ingest ACK'd, but Helix /streams hasn't
+        // shown the channel as live yet. Could be propagation
+        // (~30s after first frames), or a silent reject Helix
+        // happens to know about. Yellow so the operator notices.
+        if (liveCheck && !liveCheck.liveOnTwitch)   return "warn";
+        return "ok";
       case "starting":     return "warn";
       case "reconnecting": return "warn";
       case "stopping":     return "warn";
       default:             return "mute";
     }
-  }, [status?.state, status?.ingestAccepted]);
+  }, [status?.state, status?.ingestAccepted, liveCheck?.liveOnTwitch]);
 
   const stateLabel = useMemo(() => {
-    if (status?.state === "running" && status.ingestAccepted === false) {
-      return "running · not on twitch";
-    }
-    return status?.state || "unknown";
-  }, [status?.state, status?.ingestAccepted]);
+    if (status?.state !== "running") return status?.state || "unknown";
+    if (status.ingestAccepted === false) return "running · not on twitch";
+    if (liveCheck && !liveCheck.liveOnTwitch) return "encoding · waiting for twitch";
+    if (liveCheck?.liveOnTwitch) return "LIVE on twitch";
+    return "running";
+  }, [status?.state, status?.ingestAccepted, liveCheck?.liveOnTwitch]);
 
   const uptime = useMemo(() => {
     if (!status?.startedAt) return "—";
@@ -228,6 +256,19 @@ export function StatusTab(props: Props) {
               value={status.thermal.lastTempC != null ? `${status.thermal.lastTempC}°C` : "—"}
               tone={status.thermal.state === "throttled" ? "err" : undefined}
             />
+          )}
+          {liveCheck?.stream && (
+            <>
+              <Metric
+                label="Twitch viewers"
+                value={liveCheck.stream.viewerCount.toLocaleString()}
+                tone="ok"
+              />
+              <Metric
+                label="Twitch title"
+                value={liveCheck.stream.title || "—"}
+              />
+            </>
           )}
           {status?.error && <Metric label="Last error" value={status.error} tone="err" />}
         </div>

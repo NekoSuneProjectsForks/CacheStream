@@ -20,7 +20,24 @@ import { reconnectEventSubIfRunning } from "./eventsub";
 const REFRESH_SAFETY_MS = 60 * 1000; // refresh 60s before expiry
 let inflight: Promise<string> | null = null;
 
+/**
+ * Sticky flag for "the stored refresh token is permanently dead."
+ * Set when Twitch returns 400/401 on a refresh call. While set,
+ * every `getAccessToken()` rejects immediately without hitting
+ * Twitch — otherwise EventSub + chat would retry-spam thousands
+ * of refresh attempts per minute against the same dead token.
+ * Cleared on a successful fresh login (see oauth callback).
+ */
+let refreshTokenDead = false;
+
+export function markRefreshTokenDead(): void { refreshTokenDead = true; }
+export function markRefreshTokenAlive(): void { refreshTokenDead = false; }
+export function isRefreshTokenDead(): boolean { return refreshTokenDead; }
+
 export async function getAccessToken(): Promise<string> {
+  if (refreshTokenDead) {
+    throw new Error("refresh token rejected by Twitch — re-login required");
+  }
   const tokens = getStore().getTokens();
   if (!tokens) throw new Error("no broadcaster tokens stored (log in first)");
   if (tokens.expiresAt - Date.now() > REFRESH_SAFETY_MS) return tokens.accessToken;
@@ -46,6 +63,17 @@ async function refresh(): Promise<string> {
       });
       await onTokensRefreshed();
       return next.access_token;
+    } catch (err: any) {
+      // 400/401 from Twitch on a refresh = token is permanently dead
+      // (revoked, expired beyond grace, or secret rotated). Sticky-flag
+      // it so the retry loops back off and the operator gets a clear
+      // "re-login" signal in the panel instead of log spam.
+      const msg = String(err?.message || err);
+      if (/\b40[01]\b/.test(msg)) {
+        refreshTokenDead = true;
+        console.warn("[tokens] refresh token rejected by Twitch — re-login required");
+      }
+      throw err;
     } finally {
       inflight = null;
     }

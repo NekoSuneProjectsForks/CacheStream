@@ -101,7 +101,7 @@ docker compose up -d
 Then open `https://your-tunnel-hostname/admin` → **Login with Twitch**.
 First login claims permanent ownership. Click **Start stream** when ready.
 
-### The six required `.env` vars
+### The five required `.env` vars
 
 | Var | What | Where to get it |
 |---|---|---|
@@ -110,10 +110,14 @@ First login claims permanent ownership. Click **Start stream** when ready.
 | `TWITCH_CLIENT_SECRET` | Same dev app | Same place — click **New Secret** |
 | `SESSION_SECRET` | Random 96+ char string | `openssl rand -hex 48` |
 | `INTERNAL_API_TOKEN` | Shared bearer (web ↔ streamer) | `openssl rand -hex 32` |
-| `TWITCH_STREAM_KEY` | Your channel's RTMP key | <https://dashboard.twitch.tv/settings/stream> |
 
 When you create the Twitch dev app, set the **OAuth Redirect URL** to
 `<PUBLIC_URL>/api/auth/twitch/callback` — exact match, no trailing slash.
+
+**No stream key in `.env`.** v1.6.1 pulls the broadcaster's
+stream key directly from Twitch the first time you log in to the
+panel (via the `channel:read:stream_key` OAuth scope). Just log
+in, click **Start stream**.
 
 That's it. Everything else has sensible defaults, including the
 encoder profile which auto-tunes to your host.

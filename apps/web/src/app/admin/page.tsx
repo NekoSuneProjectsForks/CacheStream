@@ -5,6 +5,7 @@ import { tryStatus } from "@/lib/streamer-client";
 import { config } from "@/lib/config";
 import { getBranding } from "@/lib/branding";
 import { bootOnce } from "@/lib/boot";
+import { isSetupComplete } from "@/lib/settings";
 import { AdminPanel } from "./AdminPanel";
 import { LoginGate } from "./LoginGate";
 import "./admin.css";
@@ -25,6 +26,12 @@ export default async function AdminPage() {
   // First request to /admin (or any wrapped /api/* route) triggers
   // one-shot server boot — chat, eventsub, games, scene presets.
   bootOnce();
+
+  // Fresh deploys land on /setup until the operator finishes the
+  // first-run wizard. isSetupComplete() also treats a pre-v1.7
+  // .env with TWITCH_CLIENT_ID set as "complete" so existing
+  // deployments don't get bounced into the wizard.
+  if (!isSetupComplete()) redirect("/setup");
 
   const session = getCurrentSession();
   const store = getStore();
