@@ -1,6 +1,10 @@
 import type { CSSProperties, ReactNode } from "react";
 import { getBranding } from "@/lib/branding";
+import { getOverlayConfig } from "@/lib/overlays";
 import NowPlayingWidget from "./NowPlaying";
+import ChatOverlay from "./ChatOverlay";
+import AlertsTicker from "./AlertsTicker";
+import StreamStatsOverlay from "./StreamStatsOverlay";
 import "./scene-base.css";
 
 interface Props {
@@ -16,9 +20,18 @@ interface Props {
   corner?: string;
   /** Set to false to hide the brand ribbon entirely. */
   showBrand?: boolean;
-  /** Hide the Now Playing overlay (default: shown when music is active). */
+  /**
+   * Per-scene overrides for the global overlay config. Each
+   * `hideXxx` prop, when true, suppresses that overlay even if
+   * the operator has it globally enabled. Useful for scenes
+   * where the overlay would conflict (e.g. the Music scene
+   * already has its own Now Playing treatment).
+   */
   hideNowPlaying?: boolean;
-  /** Corner the Now Playing widget lives in (default: bottom-right). */
+  hideChatOverlay?: boolean;
+  hideAlertsTicker?: boolean;
+  hideStreamStats?: boolean;
+  /** Force the Now Playing widget's corner (overrides config). */
   nowPlayingCorner?: "br" | "bl" | "tr" | "tl";
   children: ReactNode;
 }
@@ -50,12 +63,23 @@ export function SceneFrame({
   corner,
   showBrand = true,
   hideNowPlaying = false,
-  nowPlayingCorner = "br",
+  hideChatOverlay = false,
+  hideAlertsTicker = false,
+  hideStreamStats = false,
+  nowPlayingCorner,
   children,
 }: Props) {
   const branding = getBranding();
+  const overlays = getOverlayConfig();
   const finalAccent = accent || branding.accent || "#00f0ff";
   const finalBrand  = brand  ?? branding.displayName;
+
+  // Resolve whether each overlay should render for this scene:
+  // global config says enabled AND per-scene didn't suppress.
+  const showNowPlaying  = overlays.nowPlaying.enabled   && !hideNowPlaying;
+  const showChat        = overlays.chat.enabled        && !hideChatOverlay;
+  const showTicker      = overlays.alertsTicker.enabled && !hideAlertsTicker;
+  const showStreamStats = overlays.streamStats.enabled  && !hideStreamStats;
 
   const style = {
     "--cs-accent-solid": finalAccent,
@@ -93,7 +117,10 @@ export function SceneFrame({
       {corner && <div className="cs-corner">{corner}</div>}
 
       <div className="cs-content">{children}</div>
-      {!hideNowPlaying && <NowPlayingWidget corner={nowPlayingCorner} />}
+      {showNowPlaying  && <NowPlayingWidget   corner={nowPlayingCorner || overlays.nowPlaying.corner} />}
+      {showChat        && <ChatOverlay        corner={overlays.chat.corner} />}
+      {showStreamStats && <StreamStatsOverlay corner={overlays.streamStats.corner} />}
+      {showTicker      && <AlertsTicker />}
     </main>
   );
 }

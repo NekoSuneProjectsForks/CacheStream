@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import NowPlayingWidget from "../_shared/NowPlaying";
+import ClientSceneOverlays from "../_shared/ClientSceneOverlays";
 
 interface DCState {
   servers: number; serversMax: number;
@@ -148,7 +148,7 @@ export default function DatacenterScene() {
 
         <div className="help">!add-server · !defend · !cool · !power+ · !invest · !restart</div>
       </div>
-      <NowPlayingWidget corner="tr" />
+      <ClientSceneOverlays nowPlayingCorner="tr" />
     </>
   );
 }

@@ -1,5 +1,54 @@
 # Changelog
 
+## 1.10.0
+
+Overlay pack — three new scene overlays + a global toggle UI,
+plus quick-pick palette swatches for the accent colour.
+
+### New scene overlays
+
+All three are wired into every scene (built-in + custom) and
+toggleable from the Branding tab. Each respects the global
+accent colour and animates in/out so transitions feel
+intentional.
+
+- **Chat overlay** — recent chat messages in a corner stack,
+  with `mod`/`sub` badges and the chatter's own colour. Auto-
+  fades messages after 60s. Subscribes to the public
+  `/api/chat/stream` SSE feed; no per-scene plumbing required.
+- **Alerts ticker** — bottom marquee of recent follows, subs,
+  gifts, cheers, raids. Pulled from `/api/alerts/stream` which
+  the EventSub client was already publishing on. Glyph + colour
+  per event type.
+- **Stream stats badge** — corner pill showing LIVE indicator,
+  uptime (seconds-precise client-side counter, hourly Helix
+  poll), and current viewer count. Hides when Twitch reports
+  the channel as offline.
+
+### New API
+
+- `GET /api/overlays/config` — public, used by scenes.
+- `POST /api/overlays/config` — owner-only.
+- `GET /api/twitch/live-public` — un-gated mirror of
+  `/api/twitch/live` so scene overlays can read uptime +
+  viewers without an OAuth cookie.
+
+### Branding tab
+
+- New "Scene overlays" card with per-overlay enable/corner
+  controls. Saves are immediate.
+- Accent picker now has eight quick-pick swatches (cyan,
+  violet, hot pink, neon green, amber, blood red, sky blue,
+  off-white). The OS colour picker is still there for arbitrary
+  hex values.
+
+### Migration
+
+No data or env changes. After upgrading, enable whichever
+overlays you want from Branding → Scene overlays. Defaults
+keep Now Playing on (existing behaviour) and the new three
+off (so existing streams look identical until you opt in).
+
 ## 1.9.3
 
 One-click updates from the panel.

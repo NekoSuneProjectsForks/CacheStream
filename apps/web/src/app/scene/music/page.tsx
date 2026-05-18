@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import ClientSceneOverlays from "../_shared/ClientSceneOverlays";
 
 /**
  * Music scene — radio-station style display for the broadcast.
@@ -403,6 +404,8 @@ export default function MusicScene() {
             Its src is set imperatively in the effect above. */}
         <audio ref={audioRef} muted playsInline preload="auto" crossOrigin="anonymous" />
       </main>
+      {/* hideNowPlaying — the music scene IS the now-playing display. */}
+      <ClientSceneOverlays hideNowPlaying />
     </>
   );
 }

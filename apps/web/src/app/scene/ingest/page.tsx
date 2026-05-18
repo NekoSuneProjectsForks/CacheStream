@@ -24,7 +24,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import NowPlayingWidget from "../_shared/NowPlaying";
+import ClientSceneOverlays from "../_shared/ClientSceneOverlays";
 
 interface IngestStatus {
   key: string;
@@ -172,7 +172,7 @@ export default function IngestScene() {
           </div>
         )}
       </div>
-      <NowPlayingWidget corner="tr" />
+      <ClientSceneOverlays nowPlayingCorner="tr" />
     </>
   );
 }

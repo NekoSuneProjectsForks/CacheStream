@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { apiJson } from "./util";
+import { OverlayConfigCard } from "./OverlayConfigCard";
 
 interface BrandingSnapshot {
   displayName: string;
@@ -128,7 +129,7 @@ export function BrandingTab({ initial }: { initial: BrandingSnapshot }) {
               />
             </Field>
           </div>
-          <div style={{ flex: "0 1 200px" }}>
+          <div style={{ flex: "1 1 280px" }}>
             <Field label="Accent colour">
               <div className="row" style={{ gap: 6 }}>
                 <input
@@ -141,6 +142,39 @@ export function BrandingTab({ initial }: { initial: BrandingSnapshot }) {
                   value={draft.accent}
                   onChange={(e) => setDraft({ ...draft, accent: e.target.value })}
                 />
+              </div>
+              {/*
+                Quick-pick palette. Click a swatch to populate the
+                accent without going through the OS colour picker.
+                Curated to cover the most common brand tints:
+                cyberpunk cyan (default), violet, hot pink, neon
+                green, amber, blood red, sky blue, off-white. The
+                preview card to the right updates instantly.
+              */}
+              <div className="row" style={{ gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+                {[
+                  "#00f0ff", "#8a2bff", "#ff2bd6", "#4ade80",
+                  "#facc15", "#f87171", "#60a5fa", "#e6f7ff",
+                ].map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => setDraft({ ...draft, accent: c })}
+                    title={c}
+                    aria-label={`Use accent ${c}`}
+                    style={{
+                      width: 22, height: 22, borderRadius: 4,
+                      background: c, cursor: "pointer",
+                      border: draft.accent.toLowerCase() === c
+                        ? "2px solid #fff"
+                        : "1px solid rgba(255,255,255,0.18)",
+                      boxShadow: draft.accent.toLowerCase() === c
+                        ? `0 0 12px ${c}`
+                        : "none",
+                      padding: 0,
+                    }}
+                  />
+                ))}
               </div>
             </Field>
           </div>
@@ -192,6 +226,8 @@ export function BrandingTab({ initial }: { initial: BrandingSnapshot }) {
           />
         </div>
       </section>
+
+      <OverlayConfigCard />
 
       <section className="card">
         <div className="card-head"><h2>Preview</h2></div>
