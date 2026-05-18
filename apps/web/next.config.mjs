@@ -15,6 +15,14 @@ const nextConfig = {
   //
   // In Next.js 14.x this option lives under `experimental`; the
   // top-level `serverExternalPackages` was added in 15.
+  //
+  // Boot-time work (chat, eventsub, games, scene seeds) is NOT
+  // hooked via instrumentation.ts — that file was fragile with
+  // Next 14 standalone output and the Edge-runtime default for
+  // instrumentation bundles. Instead `lib/boot.ts` exports a
+  // `bootOnce()` that the admin server-component and every
+  // `ownerRoute`-wrapped API call invoke; the module-level guard
+  // makes it idempotent.
   experimental: {
     serverComponentsExternalPackages: ["better-sqlite3", "ws", "music-metadata"],
     // Default body limit for server actions is 1MB, way too low for

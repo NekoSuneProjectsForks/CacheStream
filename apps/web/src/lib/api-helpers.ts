@@ -7,12 +7,17 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { AuthError, requireOwner } from "./auth";
+import { bootOnce } from "./boot";
 
 export function ownerRoute<T extends (req: NextRequest, ctx: any) => Promise<NextResponse>>(
   handler: T
 ): T {
   const wrapped = (async (req: NextRequest, ctx: any) => {
     try {
+      // Lazy server boot — see lib/boot.ts. First API call triggers
+      // chat, eventsub, games, scene-preset seed. No-op on subsequent
+      // calls.
+      bootOnce();
       requireOwner();
       return await handler(req, ctx);
     } catch (err: any) {

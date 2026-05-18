@@ -4,6 +4,7 @@ import { getStore } from "@/lib/store";
 import { tryStatus } from "@/lib/streamer-client";
 import { config } from "@/lib/config";
 import { getBranding } from "@/lib/branding";
+import { bootOnce } from "@/lib/boot";
 import { AdminPanel } from "./AdminPanel";
 import { LoginGate } from "./LoginGate";
 import "./admin.css";
@@ -21,6 +22,10 @@ import "./admin.css";
 export const dynamic = "force-dynamic";
 
 export default async function AdminPage() {
+  // First request to /admin (or any wrapped /api/* route) triggers
+  // one-shot server boot — chat, eventsub, games, scene presets.
+  bootOnce();
+
   const session = getCurrentSession();
   const store = getStore();
   const owner = store.getOwner();
