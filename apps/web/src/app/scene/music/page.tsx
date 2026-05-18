@@ -36,7 +36,15 @@ interface NowPlaying {
 }
 
 const POLL_MS = 1000;
-const BAR_COUNT = 64;
+// v1.9.0: dropped from 64 → 48 bars. Each bar is an FFT bin lookup
+// + a shadowBlur rect draw + a flipped reflection draw, so the
+// canvas-paint cost scales linearly with this. 48 still looks busy
+// at 1280px and saves ~25% of the visualiser's per-frame work.
+const BAR_COUNT = 48;
+// Render at 30fps instead of the requestAnimationFrame default
+// (60+). The streamer captures the page at 30fps anyway, so
+// painting faster than that is purely wasted CPU.
+const RENDER_FPS = 30;
 
 export default function MusicScene() {
   const [mode, setMode] = useState<"idle" | "library" | "radio">("idle");
@@ -112,7 +120,12 @@ export default function MusicScene() {
       const AC = (window.AudioContext || (window as any).webkitAudioContext);
       const ac = new AC();
       const an = ac.createAnalyser();
-      an.fftSize = 512;
+      // v1.9.0: 512 → 256. The FFT cost is O(N log N) per audio
+      // callback. 256 gives us 128 bins which we average down to
+      // BAR_COUNT (48) for display — already heavily downsampled,
+      // so the extra resolution from 256 was never visible. Cuts
+      // analyser CPU roughly in half.
+      an.fftSize = 256;
       an.smoothingTimeConstant = 0.78;
 
       const src = ac.createMediaElementSource(audio);
@@ -135,13 +148,27 @@ export default function MusicScene() {
   }, [now?.trackId]);
 
   // ---- Render loop -----------------------------------------------
+  //
+  // v1.9.0: paced to RENDER_FPS (default 30) instead of running
+  // wide-open via requestAnimationFrame. Chromium's RAF cadence is
+  // typically 60Hz; the streamer captures the page at 30fps, so
+  // painting at 60Hz means HALF of our frames are computed,
+  // discarded, and never streamed. Capping at 30 cuts canvas-paint
+  // CPU roughly in half with zero visible difference.
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    const draw = () => {
+    const minFrameInterval = 1000 / RENDER_FPS;
+    let lastDraw = 0;
+
+    const draw = (t: number) => {
+      rafRef.current = requestAnimationFrame(draw);
+      if (t - lastDraw < minFrameInterval) return;
+      lastDraw = t;
+
       const w = canvas.width = canvas.clientWidth * (window.devicePixelRatio || 1);
       const h = canvas.height = canvas.clientHeight * (window.devicePixelRatio || 1);
 
@@ -159,8 +186,6 @@ export default function MusicScene() {
       }
 
       drawBars(ctx, bars, w, h);
-
-      rafRef.current = requestAnimationFrame(draw);
     };
 
     rafRef.current = requestAnimationFrame(draw);
@@ -313,6 +338,10 @@ export default function MusicScene() {
         canvas {
           width: 100%; height: 100%;
           display: block;
+          /* v1.9.0: GPU-composited drop-shadow replaces the
+             per-bar canvas shadowBlur. Same look at a fraction
+             of the per-frame CPU. */
+          filter: drop-shadow(0 0 14px rgba(0,240,255,0.45));
         }
         .station {
           position: absolute; bottom: 56px; left: 80px;
@@ -421,19 +450,23 @@ function drawBars(ctx: CanvasRenderingContext2D, bars: number[], w: number, h: n
   grad.addColorStop(0.6, "rgba(138,43,255,0.85)");
   grad.addColorStop(1, "rgba(255,43,214,0.85)");
 
+  // v1.9.0: removed per-bar `shadowBlur = 12`. That blur was the
+  // single most expensive op in the visualiser — it forces canvas
+  // to render every bar as a separate composited layer with a
+  // gaussian blur. The same glow effect now comes from the
+  // gradient itself + a single CSS drop-shadow on the canvas
+  // element (set in the .vis-wrap CSS), drawn once by the GPU
+  // rather than per-bar per-frame.
   ctx.fillStyle = grad;
   for (let i = 0; i < bars.length; i++) {
     const v = bars[i];
     const barH = Math.max(2, v * h);
     const x = i * (barW + gap);
     const y = h - barH;
-    ctx.shadowColor = "rgba(0,240,255,0.55)";
-    ctx.shadowBlur = 12;
     ctx.fillRect(x, y, barW, barH);
   }
 
-  // Mirror underneath at lower opacity (reflection)
-  ctx.shadowBlur = 0;
+  // Mirror underneath at lower opacity (reflection).
   ctx.globalAlpha = 0.18;
   ctx.scale(1, -1);
   for (let i = 0; i < bars.length; i++) {

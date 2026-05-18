@@ -1,5 +1,6 @@
 import type { CSSProperties, ReactNode } from "react";
 import { getBranding } from "@/lib/branding";
+import NowPlayingWidget from "./NowPlaying";
 import "./scene-base.css";
 
 interface Props {
@@ -15,6 +16,10 @@ interface Props {
   corner?: string;
   /** Set to false to hide the brand ribbon entirely. */
   showBrand?: boolean;
+  /** Hide the Now Playing overlay (default: shown when music is active). */
+  hideNowPlaying?: boolean;
+  /** Corner the Now Playing widget lives in (default: bottom-right). */
+  nowPlayingCorner?: "br" | "bl" | "tr" | "tl";
   children: ReactNode;
 }
 
@@ -44,6 +49,8 @@ export function SceneFrame({
   brand,
   corner,
   showBrand = true,
+  hideNowPlaying = false,
+  nowPlayingCorner = "br",
   children,
 }: Props) {
   const branding = getBranding();
@@ -86,6 +93,7 @@ export function SceneFrame({
       {corner && <div className="cs-corner">{corner}</div>}
 
       <div className="cs-content">{children}</div>
+      {!hideNowPlaying && <NowPlayingWidget corner={nowPlayingCorner} />}
     </main>
   );
 }

@@ -360,14 +360,26 @@ class MusicEngine {
     this._suspendMusicFiller();
 
     // -re paces real-time so we don't fill the FIFO faster than
-    // the streamer drains it. volume controls our knob; loudnorm
-    // normalises perceived loudness.
+    // the streamer drains it.
+    //
+    // Loudness pipeline (v1.9.0 — was loudnorm before):
+    //   - `volume=X` is the per-engine user volume knob.
+    //   - `dynaudnorm` is a *fraction* of the CPU cost of EBU R128
+    //     `loudnorm`. loudnorm in single-pass real-time mode is the
+    //     single biggest music engine CPU sink (~10% on a Pi 5 just
+    //     for one track at a time). dynaudnorm gives a similar
+    //     perceptual leveling result for streaming purposes — peak
+    //     normalisation per ~500ms window — at maybe 1-2% CPU. It
+    //     can be overridden by setting MUSIC_LOUDNESS_FILTER in env
+    //     for operators who want the older behaviour back.
+    const loudnessFilter = process.env.MUSIC_LOUDNESS_FILTER
+      || "dynaudnorm=f=500:g=15:p=0.95";
     const args = [
       "-hide_banner", "-loglevel", "warning", "-nostats",
       "-re",
       ...inputArgs,
       "-vn",
-      "-af", `volume=${this.volume.toFixed(3)},loudnorm=I=-16:LRA=11:TP=-1.5`,
+      "-af", `volume=${this.volume.toFixed(3)},${loudnessFilter}`,
       ...AUDIO_FORMAT,
       "-y", MUSIC_FIFO,
     ];

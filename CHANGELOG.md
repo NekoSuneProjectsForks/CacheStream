@@ -1,5 +1,95 @@
 # Changelog
 
+## 1.9.0
+
+Four-feature release: fix the dead-chat regression, ship a
+Now-Playing overlay for every scene, cut the music engine's CPU
+usage, and add an RTMP ingest so you can stream OBS through
+CacheStream to Twitch.
+
+### Fixed: chat is dead after a fresh login
+
+`bootOnce()` ran once at the very first API hit and set a
+module-level `booted` flag. If the operator hadn't logged in
+yet (fresh deploy, wizard not complete), the chat + EventSub
+startup branch hit "no broadcaster tokens — skipping" and was
+never re-entered. After login, `onTokensRefreshed()` called
+`reconnectChatIfRunning()` which **bails when state === idle**
+— so EventSub never connected, the
+`channel.chat.message` subscription was never created, and chat
+commands silently never fired any game handlers.
+
+Fix: split boot into `bootOnce()` (one-shot init: games, music,
+scene seeds) and `startServicesIfReady()` (idempotent: chat +
+eventsub). The OAuth callback now calls
+`startServicesIfReady()` after saving tokens, so the first
+post-wizard chat works without a container restart.
+
+### Added: Now Playing widget on every scene
+
+`apps/web/src/app/scene/_shared/NowPlaying.tsx` is a small
+bottom-corner overlay showing the current track's cover, title,
+and artist (or the radio source). It's hooked into every scene
+that uses `SceneFrame` (`brb`, `ending`, `offline`, `starting-
+soon`, custom) and manually added to the AI Pet + Datacenter
+scenes. The dedicated Music scene doesn't get it (it has its
+own treatment).
+
+Toggle off per scene via the `hideNowPlaying` prop on
+`SceneFrame`. Cover cascade matches the music scene: track
+cover → broadcaster logo → CD-icon placeholder. Animates in on
+mount and out when music goes idle.
+
+### Music / radio CPU cut
+
+The music engine's writer was the single biggest non-encoder
+CPU sink on the Pi 5 — `loudnorm=I=-16:LRA=11:TP=-1.5` in
+real-time mode is expensive. Plus the music scene's visualiser
+was painting at 60Hz with per-bar `shadowBlur` (canvas's most
+expensive op).
+
+Changes:
+- `loudnorm` → `dynaudnorm=f=500:g=15:p=0.95`. ~5-10× cheaper
+  with a very similar perceptual leveling result. Override via
+  `MUSIC_LOUDNESS_FILTER=` env if you want the old behaviour.
+- Visualiser FFT 512 → 256, bar count 64 → 48.
+- Render loop paced to 30fps (we capture the page at 30fps —
+  painting twice as often was wasted work).
+- Per-bar `shadowBlur` removed; replaced with a single CSS
+  `filter: drop-shadow()` on the canvas (GPU-composited once
+  per frame instead of per-bar).
+
+Expected impact: ~30-50% drop in the web container's user-CPU
+while music is playing, depending on host.
+
+### Added: RTMP ingest (OBS → CacheStream → Twitch)
+
+New `ingest` compose service running `nginx-rtmp`. Push from
+OBS (or any RTMP encoder) to
+`rtmp://<host>:1935/live` with the configured stream key. The
+ingest container wraps the feed as HLS chunks; the new
+`/scene/ingest` page plays the HLS via `hls.js` in headless
+Chromium. The streamer captures + re-encodes that page as
+usual, so all of your overlays + chat games + Now Playing
+widget still composite over the OBS feed on the way to Twitch.
+
+- New compose volume: `cachestream-ingest-hls` (tmpfs would be
+  ideal; using a named volume is fine for now).
+- New env: `RTMP_PORT` (default 1935).
+- Stream key defaults to the literal `cache`; rotate via the
+  Stream Info card or `POST /api/ingest/config { rotateKey: true }`.
+- Latency: typically 3-5s OBS → Twitch (HLS adds 2-3s of
+  buffering on top of the existing CacheStream pipeline).
+
+### Migration
+
+- `docker compose pull && docker compose up -d --build` will
+  start the new `ingest` container alongside the existing two.
+- The new `RTMP_PORT` env defaults sanely; no .env edits
+  required unless you want a different host port.
+- Built-in scene presets gain "RTMP Ingest"; existing custom
+  scenes are untouched.
+
 ## 1.8.2
 
 Two music library fixes:

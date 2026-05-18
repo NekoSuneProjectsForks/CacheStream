@@ -27,10 +27,12 @@ import { pushIngestToStreamer } from "./twitchIngest";
 import { musicEngine } from "./music";
 
 let booted = false;
+let servicesStarted = false;
 
 export function bootOnce(): void {
   if (booted) return;
   booted = true;
+  console.log("[boot] bootOnce() running — initialising games, music, chat, eventsub");
 
   // Boot game engines unconditionally — they subscribe to the chat
   // bus during init(), so they must be alive BEFORE chat connects.
@@ -47,30 +49,15 @@ export function bootOnce(): void {
   // not lazily on the first /api/music/* request.
   try { musicEngine(); } catch (err) { console.warn("[boot] music engine init:", err); }
 
-  const store = getStore();
-  const tokens = store.getTokens();
-  if (!tokens) {
-    console.log("[boot] no broadcaster tokens — skipping chat/eventsub startup");
-  } else {
-    Promise.allSettled([startChat(), startEventSub()]).then((results) => {
-      for (const r of results) {
-        if (r.status === "rejected") console.warn("[boot] worker start error:", r.reason);
-      }
-    });
-
-    // Push the dashboard-stored ingest credentials (if any) to the
-    // streamer. Handles the case where the streamer container
-    // restarted and lost its in-memory copy of the runtime override.
-    setTimeout(() => {
-      pushIngestToStreamer().catch((err) =>
-        console.warn("[boot] ingest push failed:", err)
-      );
-    }, 3_000);
-  }
+  // Kick services. If tokens aren't there yet (fresh deploy,
+  // pre-wizard), the helper turns into a no-op + the OAuth
+  // callback will retry once tokens land. See `startServicesIfReady`.
+  startServicesIfReady();
 
   // Seed scene presets for built-in scenes on first boot. Runs
   // regardless of tokens so a fresh install has presets to pick
   // from before the operator logs in.
+  const store = getStore();
   try {
     const existing = new Set(store.listScenes().map((s) => s.url));
     const builtins: Array<{ name: string; url: string }> = [
@@ -82,6 +69,7 @@ export function bootOnce(): void {
       { name: "Music / Radio", url: "http://web:7788/scene/music" },
       { name: "AI Pet",        url: "http://web:7788/scene/pet" },
       { name: "Datacenter",    url: "http://web:7788/scene/datacenter" },
+      { name: "RTMP Ingest",   url: "http://web:7788/scene/ingest" },
     ];
     let added = 0;
     for (const b of builtins) {
@@ -91,4 +79,43 @@ export function bootOnce(): void {
   } catch (err) {
     console.warn("[boot] preset seed failed:", err);
   }
+}
+
+/**
+ * Try to start chat + eventsub. Idempotent — safe to call from
+ * both `bootOnce()` (at first API hit) and the OAuth callback
+ * (after a fresh login). The first call where tokens are present
+ * actually starts the services; subsequent calls are no-ops
+ * because the underlying clients have their own "already
+ * connecting/connected" guards.
+ *
+ * Why this exists as a separate function from bootOnce:
+ *   bootOnce uses a one-shot `booted` flag so it never re-runs
+ *   the games + music + scene-seed work. But chat/eventsub need
+ *   to be (re)startable after a fresh login, since on a clean
+ *   install bootOnce runs BEFORE the user logs in (no tokens →
+ *   skipped). The OAuth callback then calls this directly to
+ *   bring them up.
+ */
+export function startServicesIfReady(): void {
+  if (servicesStarted) return;
+  const tokens = getStore().getTokens();
+  if (!tokens) {
+    console.log("[boot] no broadcaster tokens yet — chat/eventsub deferred until login");
+    return;
+  }
+  servicesStarted = true;
+  console.log("[boot] tokens present — starting chat + eventsub");
+
+  Promise.allSettled([startChat(), startEventSub()]).then((results) => {
+    for (const r of results) {
+      if (r.status === "rejected") console.warn("[boot] worker start error:", r.reason);
+    }
+  });
+
+  setTimeout(() => {
+    pushIngestToStreamer().catch((err) =>
+      console.warn("[boot] ingest push failed:", err)
+    );
+  }, 3_000);
 }

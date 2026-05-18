@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import NowPlayingWidget from "../_shared/NowPlaying";
 
 interface PetState {
   name: string; species: string;
@@ -158,6 +159,7 @@ export default function PetScene() {
           <Stat label="Morality"    v={s.morality} />
         </div>
       </div>
+      <NowPlayingWidget corner="tr" />
     </Scene>
   );
 }

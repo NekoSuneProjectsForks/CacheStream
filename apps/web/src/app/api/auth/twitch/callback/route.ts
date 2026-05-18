@@ -93,6 +93,16 @@ export async function GET(req: NextRequest) {
   // up the new tokens immediately rather than wait for first use.
   try { await onTokensRefreshed(); } catch (err) { console.warn("[oauth] post-token hook:", err); }
 
+  // Boot chat + eventsub if this is the first login since startup
+  // (bootOnce ran with no tokens → skipped service start). Idempotent
+  // so re-logins are safe. Fixes the silent-dead-chat bug where the
+  // panel showed everything fine but EventSub was never connected
+  // because bootOnce's one-shot flag had already flipped to true.
+  try {
+    const { startServicesIfReady } = await import("@/lib/boot");
+    startServicesIfReady();
+  } catch (err) { console.warn("[oauth] service-start hook:", err); }
+
   // Auto-pull the broadcaster's current stream key from Helix and
   // push it to the streamer. Run async so the redirect to /admin
   // isn't blocked — the result is visible in the Stream Info card

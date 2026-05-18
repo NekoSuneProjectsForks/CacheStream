@@ -75,6 +75,7 @@ class EventSubClient {
     // Flip state synchronously before _connect so concurrent
     // start() calls bail. Same race-class fix as chat.ts.
     this.state = "connecting";
+    console.log("[eventsub] start() — opening websocket to", reconnectUrl || EVENTSUB_URL);
     this._connect(reconnectUrl);
   }
 
