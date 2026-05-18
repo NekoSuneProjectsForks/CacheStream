@@ -78,12 +78,26 @@ export default function DatacenterScene() {
         .stat-card.crit .val { color: #f87171; text-shadow: 0 0 14px rgba(248,113,113,.55); }
         .stat-card.warn .val { color: #facc15; }
 
-        .feed { grid-column: 1 / -1; height: 160px; overflow: hidden; }
-        .feed-list { display: flex; flex-direction: column; gap: 2px;
-          font-size: 12px; color: rgba(230,247,255,.65); padding: 0;
-          height: 100%; overflow: hidden; }
-        .feed-list div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .attack { color: #f87171; }
+        .feed { grid-column: 1 / -1; min-height: 0; max-height: 180px; overflow: hidden;
+          display: flex; flex-direction: column; }
+        .feed-list { display: flex; flex-direction: column; gap: 6px;
+          font-size: 13px; line-height: 1.35; color: rgba(230,247,255,.72);
+          padding: 0; flex: 1; min-height: 0; overflow: hidden;
+          font-variant-numeric: tabular-nums; }
+        .feed-line {
+          display: grid; grid-template-columns: 84px 1fr;
+          gap: 12px; align-items: baseline;
+          white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .feed-line .ts {
+          font-size: 11px; letter-spacing: .15em;
+          color: rgba(230,247,255,.35);
+          font-family: 'JetBrains Mono', monospace;
+        }
+        .feed-line .body { overflow: hidden; text-overflow: ellipsis; }
+        .feed-line.attack .body { color: #f87171; }
+        .feed-line.act .body { color: rgba(0,240,255,.85); }
+        .feed-empty { color: rgba(230,247,255,.3); font-style: italic; }
         .help {
           position: absolute; right: 24px; bottom: 18px;
           font-size: 11px; letter-spacing: .2em; text-transform: uppercase;
@@ -121,9 +135,11 @@ export default function DatacenterScene() {
         <div className="panel feed">
           <h2>Event feed</h2>
           <div className="feed-list">
-            {s.log.slice(-12).reverse().map((l, i) => (
-              <div key={i} className={l.kind === "attack" ? "attack" : ""}>
-                [{new Date(l.at).toLocaleTimeString()}] {l.text}
+            {s.log.length === 0 && <div className="feed-empty">no events yet — chat type !add-server, !defend, !cool…</div>}
+            {s.log.slice(-7).reverse().map((l, i) => (
+              <div key={`${l.at}-${i}`} className={`feed-line ${l.kind}`}>
+                <span className="ts">{new Date(l.at).toLocaleTimeString([], { hour12: false })}</span>
+                <span className="body">{l.text}</span>
               </div>
             ))}
           </div>

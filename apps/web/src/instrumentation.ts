@@ -16,6 +16,17 @@ export async function register() {
   const { startEventSub } = await import("./lib/twitch/eventsub");
 
   const store = getStore();
+
+  // Boot game engines unconditionally — they subscribe to the chat
+  // bus during init(), so they must be alive BEFORE chat connects.
+  // Previously this lived inside the tokens-present branch, which
+  // meant a fresh install (no tokens yet) booted chat later via the
+  // admin panel but the games never woke up to hear it.
+  const { pet } = await import("./lib/games/pet");
+  const { datacenter } = await import("./lib/games/datacenter");
+  try { pet(); } catch (err) { console.warn("[boot] pet init:", err); }
+  try { datacenter(); } catch (err) { console.warn("[boot] datacenter init:", err); }
+
   const tokens = store.getTokens();
   if (!tokens) {
     console.log("[boot] no broadcaster tokens — skipping chat/eventsub startup");
@@ -27,14 +38,6 @@ export async function register() {
       if (r.status === "rejected") console.warn("[boot] worker start error:", r.reason);
     }
   });
-
-  // Boot game engines unconditionally — they tick whether or not
-  // chat is connected, and their chat hooks no-op when no messages
-  // arrive on the bus.
-  const { pet } = await import("./lib/games/pet");
-  const { datacenter } = await import("./lib/games/datacenter");
-  try { pet(); } catch (err) { console.warn("[boot] pet init:", err); }
-  try { datacenter(); } catch (err) { console.warn("[boot] datacenter init:", err); }
 
   // Seed scene presets for built-in scenes on first boot. We only
   // add ones the operator doesn't already have (matched by URL).

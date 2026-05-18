@@ -75,6 +75,13 @@ export function MusicTab() {
     wrap("shuf", () => apiJson("/api/music/mode", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ shuffle: !status?.shuffle }),
     }));
+  // Start playback when nothing is queued: grab the first track in
+  // the library (or a random one if shuffle is on) and play it.
+  const playLibrary = () => {
+    if (tracks.length === 0) return;
+    const pick = status?.shuffle ? tracks[Math.floor(Math.random() * tracks.length)] : tracks[0];
+    return play(pick.id);
+  };
 
   // ---- Library ops --------------------------------------------
   const rescan = () =>
@@ -170,6 +177,11 @@ export function MusicTab() {
 
   const np = status?.nowPlaying;
   const cover = np?.trackId ? `/api/music/cover/${np.trackId}` : null;
+  const isPlaying = !!np && (status?.mode === "library" || status?.mode === "radio");
+  const subtitle =
+    status?.mode === "radio"   ? "Radio stream" :
+    status?.mode === "library" ? (np?.artist || "Library") :
+    "Idle";
 
   return (
     <>
@@ -184,32 +196,54 @@ export function MusicTab() {
         </div>
 
         <div className="now-playing">
-          <div className="np-cover">
+          <div className={`np-cover ${isPlaying ? "spin" : ""}`}>
             {cover ? <img src={cover} alt="" onError={(e) => { (e.currentTarget as HTMLImageElement).style.opacity = "0"; }} /> : <span>♫</span>}
           </div>
           <div className="np-meta">
-            <div className="np-mode">{status?.mode || "idle"} · {np ? "now playing" : "—"}</div>
-            <div className="np-title">{np?.title || "Nothing playing"}</div>
-            {np?.artist && <div className="np-artist">{np.artist}</div>}
-            {np?.album  && <div className="np-album">{np.album}</div>}
+            <div className="np-mode">
+              <span className={`dot ${isPlaying ? "live" : ""}`} />
+              {status?.mode === "radio" ? "On air · Radio" : status?.mode === "library" ? "On air · Library" : "Idle"}
+            </div>
+            <div className="np-title">{np?.title || (isPlaying ? "—" : "Nothing playing")}</div>
+            <div className="np-artist">{subtitle}</div>
+            {np?.album && <div className="np-album">{np.album}</div>}
           </div>
         </div>
 
         <div className="actions">
-          <button className="btn-primary" disabled={!!busy} onClick={next}>Next</button>
-          <button className="btn-danger"  disabled={!!busy} onClick={stop}>Stop</button>
-          <button className="btn-ghost"   disabled={!!busy} onClick={toggleLoop}>Loop · {status?.loop ? "on" : "off"}</button>
-          <button className="btn-ghost"   disabled={!!busy} onClick={toggleShuffle}>Shuffle · {status?.shuffle ? "on" : "off"}</button>
+          {isPlaying ? (
+            <button className="btn-primary" disabled={!!busy} onClick={next}>Next ▸</button>
+          ) : (
+            <button className="btn-primary" disabled={!!busy || tracks.length === 0} onClick={playLibrary}>▶ Play library</button>
+          )}
+          <button className="btn-danger" disabled={!!busy || !isPlaying} onClick={stop}>■ Stop</button>
+          <button className={`btn-ghost toggle ${status?.loop ? "on" : ""}`}    disabled={!!busy} onClick={toggleLoop}>Loop</button>
+          <button className={`btn-ghost toggle ${status?.shuffle ? "on" : ""}`} disabled={!!busy} onClick={toggleShuffle}>Shuffle</button>
         </div>
 
-        <div className="row gap" style={{ marginTop: ".75rem", alignItems: "center" }}>
-          <span style={{ color: "var(--text-dim)" }}>Volume</span>
+        <div className="vol-row">
+          <span className="vol-label">Volume</span>
           <input type="range" min={0} max={1} step={0.02}
                  value={status?.volume ?? 0.6}
-                 onChange={(e) => setVolume(Number(e.target.value))}
-                 style={{ flex: 1 }} />
-          <span className="mono">{Math.round((status?.volume ?? 0) * 100)}%</span>
+                 onChange={(e) => setVolume(Number(e.target.value))} />
+          <span className="vol-val mono">{Math.round((status?.volume ?? 0) * 100)}%</span>
         </div>
+
+        {status?.queue && status.queue.length > 0 && (
+          <div className="up-next">
+            <div className="up-next-head">Up next · {status.queue.length}</div>
+            <ol className="up-next-list">
+              {status.queue.slice(0, 3).map((t, i) => (
+                <li key={`${t.id}-${i}`}>
+                  <span className="idx mono">{String(i + 1).padStart(2, "0")}</span>
+                  <span className="t">{t.title || t.path}</span>
+                  {t.artist && <span className="a">{t.artist}</span>}
+                </li>
+              ))}
+              {status.queue.length > 3 && <li className="muted">+ {status.queue.length - 3} more</li>}
+            </ol>
+          </div>
+        )}
 
         {status?.lastError && <p className="hint" style={{ color: "var(--err)" }}>{status.lastError}</p>}
       </section>
@@ -263,7 +297,7 @@ export function MusicTab() {
                     {t.manual && <span className="tag" title="manually edited">edited</span>}
                   </div>
                   <div className="track-sub">
-                    {[t.artist, t.album].filter(Boolean).join(" · ") || <span className="muted mono">{t.path}</span>}
+                    {[t.artist, t.album, fmtDuration(t.durationS)].filter(Boolean).join(" · ") || <span className="muted mono">{t.path}</span>}
                   </div>
                 </div>
               )}
@@ -326,13 +360,80 @@ export function MusicTab() {
           display: flex; align-items: center; justify-content: center;
           color: var(--neon-cyan); font-size: 32px;
           overflow: hidden;
+          transition: box-shadow .25s ease;
         }
+        .np-cover.spin {
+          box-shadow: 0 0 28px rgba(0,240,255,0.30);
+        }
+        .np-cover.spin img { animation: cover-spin 24s linear infinite; }
+        @keyframes cover-spin { from { transform: rotate(0); } to { transform: rotate(360deg); } }
         .np-cover img { width: 100%; height: 100%; object-fit: cover; }
         .np-meta { display: flex; flex-direction: column; justify-content: center; gap: 2px; min-width: 0; }
-        .np-mode { font-size: 10px; letter-spacing: .25em; text-transform: uppercase; color: var(--text-mute); }
+        .np-mode {
+          display: inline-flex; align-items: center; gap: 8px;
+          font-size: 10px; letter-spacing: .25em; text-transform: uppercase;
+          color: var(--text-mute);
+        }
+        .np-mode .dot {
+          width: 7px; height: 7px; border-radius: 50%;
+          background: rgba(230,247,255,0.2);
+        }
+        .np-mode .dot.live {
+          background: var(--ok);
+          box-shadow: 0 0 10px var(--ok);
+          animation: live-pulse 1.6s ease-in-out infinite;
+        }
+        @keyframes live-pulse { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
         .np-title { font-size: 1.15rem; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .np-artist { color: var(--text-dim); }
         .np-album { color: var(--text-mute); font-size: .82rem; }
+
+        .btn-ghost.toggle.on {
+          color: var(--neon-cyan);
+          border-color: var(--neon-cyan);
+          background: rgba(0,240,255,0.08);
+          box-shadow: 0 0 14px rgba(0,240,255,0.25);
+        }
+
+        .vol-row {
+          display: grid; grid-template-columns: 64px 1fr 48px;
+          gap: 12px; align-items: center;
+          margin-top: .9rem;
+        }
+        .vol-label {
+          font-size: 10px; letter-spacing: .25em; text-transform: uppercase;
+          color: var(--text-mute);
+        }
+        .vol-row input[type="range"] {
+          width: 100%;
+          accent-color: var(--neon-cyan);
+        }
+        .vol-val { text-align: right; color: var(--text-dim); font-size: .82rem; }
+
+        .up-next {
+          margin-top: .9rem;
+          padding-top: .75rem;
+          border-top: 1px solid var(--line-soft);
+        }
+        .up-next-head {
+          font-size: 10px; letter-spacing: .25em; text-transform: uppercase;
+          color: var(--text-mute);
+          margin-bottom: .4rem;
+        }
+        .up-next-list {
+          list-style: none; padding: 0; margin: 0;
+          display: flex; flex-direction: column; gap: 2px;
+        }
+        .up-next-list li {
+          display: grid; grid-template-columns: 28px 1fr auto;
+          gap: 10px; align-items: baseline;
+          font-size: .85rem;
+          padding: 3px 0;
+        }
+        .up-next-list .idx { color: var(--text-mute); font-size: .72rem; }
+        .up-next-list .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .up-next-list .a { color: var(--text-dim); font-size: .76rem; }
+        .up-next-list li.muted { grid-template-columns: 1fr; color: var(--text-mute); font-size: .76rem; padding-left: 38px; }
 
         .track-list {
           list-style: none; padding: 0; margin: 8px 0 0;
@@ -370,4 +471,11 @@ export function MusicTab() {
       `}</style>
     </>
   );
+}
+
+function fmtDuration(s: number | null | undefined): string | null {
+  if (!s || s <= 0) return null;
+  const m = Math.floor(s / 60);
+  const r = Math.floor(s % 60);
+  return `${m}:${r.toString().padStart(2, "0")}`;
 }

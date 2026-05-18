@@ -21,7 +21,27 @@ import { getDb } from "../db";
 import { publish, subscribe } from "../bus";
 
 const TICK_MS = 10_000;
-const LOG_CAP = 40;
+const LOG_CAP = 24;
+
+/**
+ * Push a log entry, but collapse a repeat of the same text into a
+ * counter on the previous line (e.g. "x3") so the feed doesn't
+ * flood with identical "no active attacks" / "can't afford …"
+ * lines when chat is hammering a command.
+ */
+function pushLog(
+  log: Array<{ at: number; kind: string; text: string }>,
+  entry: { at: number; kind: string; text: string },
+): Array<{ at: number; kind: string; text: string }> {
+  const last = log[log.length - 1];
+  if (last && last.text === entry.text && last.kind === entry.kind) {
+    const m = last.text.match(/ \(x(\d+)\)$/);
+    const n = m ? parseInt(m[1], 10) + 1 : 2;
+    const base = m ? last.text.replace(/ \(x\d+\)$/, "") : last.text;
+    return [...log.slice(0, -1), { ...entry, text: `${base} (x${n})` }].slice(-LOG_CAP);
+  }
+  return [...log, entry].slice(-LOG_CAP);
+}
 
 export interface DatacenterState {
   servers: number;
@@ -92,9 +112,11 @@ class Datacenter {
     s.coolant = clamp(s.coolant - 1, 0, 100);
 
     // Attacks decay slowly without intervention (some fail by themselves).
+    // No log line for this — the attack counter dropping is signal
+    // enough, and "attack expired" every other tick is what made
+    // the feed unreadable.
     if (s.attacksActive > 0 && Math.random() < 0.1) {
       s.attacksActive = Math.max(0, s.attacksActive - 1);
-      s.log = [...s.log.slice(-LOG_CAP), { at: Date.now(), kind: "attack-fade", text: "attack expired" }];
     }
 
     // Uptime: drops when too hot or under attack, recovers slowly.
@@ -108,7 +130,7 @@ class Datacenter {
     // Random attack spawn (5% per tick when not already at the cap).
     if (s.attacksActive < 3 && Math.random() < 0.05) {
       s.attacksActive++;
-      s.log = [...s.log.slice(-LOG_CAP), { at: Date.now(), kind: "attack", text: "⚠ incoming attack — type !defend" }];
+      s.log = pushLog(s.log, { at: Date.now(), kind: "attack", text: "⚠ incoming attack — type !defend" });
     }
 
     // Budget growth from healthy uptime.
@@ -141,37 +163,36 @@ class Datacenter {
     const cmd = head[0];
     const actor = msg.name || msg.login || "anon";
     const s = this.state();
-    let logged: string | null = null;
     let changed = false;
 
+    // Log only when something actually happens. We used to log
+    // every "can't afford …" / "no active attacks" reply, which
+    // meant a single chatter spamming !defend buried real events.
     const log = (text: string, kind = "act") => {
-      s.log = [...s.log.slice(-LOG_CAP), { at: Date.now(), kind, text: `${actor}: ${text}` }];
-      logged = text;
+      s.log = pushLog(s.log, { at: Date.now(), kind, text: `${actor}: ${text}` });
       changed = true;
     };
 
     switch (cmd) {
       case "add-server":
       case "addserver":
-        if (s.budget < 200) { log("can't afford server (need 200)"); break; }
-        if (s.serversMax >= 12) { log("rack full"); break; }
+        if (s.budget < 200 || s.serversMax >= 12) break;
         s.budget -= 200; s.servers += 1; s.serversMax += 1;
         log(`+1 server (now ${s.servers})`);
         break;
       case "defend":
-        if (s.attacksActive === 0) { log("no active attacks"); break; }
+        if (s.attacksActive === 0) break;
         s.attacksActive -= 1; s.reputation = clamp(s.reputation + 1, 0, 100);
         log("defended attack");
         break;
       case "cool":
-        if (s.coolant >= 100) { log("coolant already full"); break; }
-        if (s.budget < 25) { log("can't afford coolant"); break; }
+        if (s.coolant >= 100 || s.budget < 25) break;
         s.budget -= 25; s.coolant = clamp(s.coolant + 30, 0, 100); s.temperatureC = clamp(s.temperatureC - 6, 18, 110);
         log("+30 coolant");
         break;
       case "power+":
       case "boostpower":
-        if (s.budget < 100) { log("can't afford power upgrade"); break; }
+        if (s.budget < 100) break;
         s.budget -= 100; s.powerKwCap += 5;
         log(`power cap +5 (now ${s.powerKwCap}kW)`);
         break;
@@ -180,7 +201,7 @@ class Datacenter {
         log("system restart");
         break;
       case "invest":
-        if (s.budget < 100) { log("can't afford investment"); break; }
+        if (s.budget < 100) break;
         s.budget -= 100; s.reputation = clamp(s.reputation + 10, 0, 100);
         log("+10 reputation");
         break;
