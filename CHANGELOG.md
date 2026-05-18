@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.7.5
+
+The streamer-side keep-alive fd alone (v1.7.3) wasn't enough to
+unblock FFmpeg's open on music.fifo. FFmpeg's PCM s16le demuxer
+appears to need an actual writer producing bytes, not just an
+fd held open. Adding a dedicated silent-PCM filler on the web
+side that always writes to music.fifo when no track is playing.
+
+- **Second silence filler on the web side** dedicated to
+  music.fifo. Suspended while a real track plays, resumed when
+  the track ends. Both fillers boot at music-engine
+  construction time so both FIFOs always have a writer when the
+  streamer's FFmpeg opens them.
+- **Confirmation log on streamer side** for the keep-alive fd
+  open (`music fifo keep-alive opened`). Helps tell apart "fd
+  held but FFmpeg still hung" from "fd open failed silently".
+
 ## 1.7.4
 
 Hotfix for v1.7.3 — the music.fifo keep-alive open failed with

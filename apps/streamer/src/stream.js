@@ -486,6 +486,7 @@ class Streamer extends EventEmitter {
     // read side as "no data" and falls back to silence.fifo.
     try {
       this.musicFifoFd = fs.openSync(musicFifo, fs.constants.O_RDWR | fs.constants.O_NONBLOCK);
+      this.logger.info({ musicFifo, fd: this.musicFifoFd }, "music fifo keep-alive opened");
     } catch (err) {
       this.logger.warn({ err: err.message, musicFifo }, "could not open music fifo as keep-alive writer");
       this.musicFifoFd = null;

@@ -81,6 +81,28 @@ interface MusicStatus {
 class MusicEngine {
   private ffmpeg: ChildProcess | null = null;
   /**
+   * Second silent-PCM writer, dedicated to music.fifo. Runs
+   * whenever there's no real music track playing.
+   *
+   * Why this exists (separate from the silence.fifo filler):
+   *   The streamer's main ffmpeg opens BOTH fifos O_RDONLY. The
+   *   open blocks until a writer exists. silence.fifo always has
+   *   one (the main `filler`), but music.fifo only had a writer
+   *   while a track was playing. On a fresh start with nothing
+   *   queued, the streamer's ffmpeg hung forever on
+   *   open(music.fifo) and never reached the encode/RTMP stage.
+   *
+   *   This music-side filler guarantees music.fifo always has
+   *   a writer. When a real track is queued, we kill the filler
+   *   so the track's ffmpeg can take over the writer side; when
+   *   the track ends, the filler resumes. The streamer's amix
+   *   with dropout_transition=0 masks the brief sub-100ms gap
+   *   during the handoff.
+   */
+  private musicFiller: ChildProcess | null = null;
+  /** True while a real track is intentionally writing to music.fifo. */
+  private musicFillerSuspended = false;
+  /**
    * Background "silence filler" FFmpeg. Always writes silent PCM
    * into the FIFO whenever there's no real music playing.
    *
@@ -110,9 +132,12 @@ class MusicEngine {
     this.volume = clamp01(Number(kvGet("music_volume") ?? "0.6"));
     this.loop  = kvGet("music_loop") !== "0";
     this.shuffle = kvGet("music_shuffle") === "1";
-    // Boot the filler immediately so the FIFO has a writer the
-    // moment the streamer's main FFmpeg tries to open it.
+    // Boot both fillers immediately so BOTH fifos have a writer
+    // the moment the streamer's main FFmpeg tries to open them.
+    // Without the music-side filler, the streamer's ffmpeg hangs
+    // on open(music.fifo) when nothing is queued.
     this._startSilenceFiller();
+    this._startMusicFiller();
   }
 
   status(): MusicStatus {
@@ -306,11 +331,13 @@ class MusicEngine {
   private _spawnFfmpegForInput(inputArgs: string[], onExit?: () => void): void {
     this._ensureFifos();
     this._killFfmpeg();
-    // IMPORTANT: do NOT stop the silence filler. It writes to a
-    // separate FIFO (SILENCE_FIFO); our music writer goes to
-    // MUSIC_FIFO. The streamer amix-es both, so a gap on
-    // MUSIC_FIFO (e.g. between tracks) gracefully falls back to
-    // the silence carrier without dropping the audio stream.
+
+    // Suspend the music-side silence filler so it doesn't fight
+    // the track writer for the FIFO. Only one writer per FIFO at
+    // a time — POSIX guarantees both writers' output would be
+    // interleaved at byte boundaries, which would corrupt PCM
+    // samples. We resume the filler in `proc.on("exit")` below.
+    this._suspendMusicFiller();
 
     // -re paces real-time so we don't fill the FIFO faster than
     // the streamer drains it. volume controls our knob; loudnorm
@@ -334,12 +361,16 @@ class MusicEngine {
     });
     proc.on("exit", () => {
       this.ffmpeg = null;
+      // Resume the silence filler on the music FIFO so the
+      // streamer's open(music.fifo) stays satisfied between
+      // tracks. amix in the streamer's filter graph carries on
+      // mixing silence — the listener hears the silence.fifo
+      // carrier (which is also silence when no music's playing,
+      // so it's just quiet, as expected).
+      this._resumeMusicFiller();
       if (onExit) {
         try { onExit(); } catch (err) { console.warn("[music] onExit:", err); }
       }
-      // No silence-filler resurrection here — it never stopped.
-      // The MUSIC_FIFO just goes quiet (no writer); amix in the
-      // streamer carries on with the silence FIFO alone.
     });
   }
 
@@ -382,6 +413,51 @@ class MusicEngine {
     if (!this.filler) return;
     try { this.filler.kill("SIGTERM"); } catch {}
     this.filler = null;
+  }
+
+  /**
+   * Silence filler dedicated to the music FIFO. Runs whenever
+   * no real track is writing. Without this, the streamer's
+   * ffmpeg blocks forever on open(music.fifo) when nothing is
+   * queued at boot.
+   */
+  private _startMusicFiller(): void {
+    if (this.musicFiller || this.musicFillerSuspended) return;
+    this._ensureFifos();
+    try {
+      const proc = spawn("ffmpeg", [
+        "-hide_banner", "-loglevel", "error", "-nostats",
+        "-re",
+        "-f", "lavfi",
+        "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
+        ...AUDIO_FORMAT,
+        "-y", MUSIC_FIFO,
+      ], { stdio: ["ignore", "ignore", "pipe"] });
+      this.musicFiller = proc;
+      proc.on("exit", () => {
+        this.musicFiller = null;
+        // Auto-respawn unless we're intentionally suspending it
+        // to hand the FIFO off to a real track writer.
+        if (!this.musicFillerSuspended) {
+          setTimeout(() => this._startMusicFiller(), 250);
+        }
+      });
+    } catch (err: any) {
+      this.lastError = `music filler failed: ${err.message}`;
+    }
+  }
+
+  private _suspendMusicFiller(): void {
+    this.musicFillerSuspended = true;
+    if (this.musicFiller) {
+      try { this.musicFiller.kill("SIGTERM"); } catch {}
+      this.musicFiller = null;
+    }
+  }
+
+  private _resumeMusicFiller(): void {
+    this.musicFillerSuspended = false;
+    this._startMusicFiller();
   }
 
   private _ensureFifos(): void {
