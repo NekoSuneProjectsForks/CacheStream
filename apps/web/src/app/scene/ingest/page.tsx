@@ -78,10 +78,11 @@ export default function IngestScene() {
     let mounted = true;
     (async () => {
       try {
-        // Dynamic-loaded so the rest of the app doesn't pull a
-        // ~150KB lib it never uses. Cached in the headless
-        // Chromium's HTTP cache after the first scene activation.
-        const mod = await import("https://cdn.jsdelivr.net/npm/hls.js@1.5.13/dist/hls.mjs" as any);
+        // hls.js is an npm dep. Dynamic-imported so it doesn't get
+        // bundled into routes that don't need it (every other
+        // scene). Next's code-splitter resolves this to a separate
+        // chunk that loads when /scene/ingest is first visited.
+        const mod = await import("hls.js");
         if (!mounted) return;
         const Hls = mod.default;
         if (!Hls.isSupported()) {

@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.9.1
+
+GHCR build hotfix — v1.9.0's release workflow failed to build
+the web image. The ingest scene tried to `await import()` hls.js
+from a remote CDN URL, which webpack rejects: "The target
+environment doesn't support dynamic import() syntax so it's not
+possible to use external type 'module' within a script".
+
+Fixed by adding `hls.js` as a regular npm dependency and
+importing it normally. Next's code-splitter still keeps it out
+of every other route's bundle, so the size win is the same — it
+only loads when /scene/ingest is first opened.
+
 ## 1.9.0
 
 Four-feature release: fix the dead-chat regression, ship a
