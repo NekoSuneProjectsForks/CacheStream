@@ -1,5 +1,38 @@
 # Changelog
 
+## 1.8.2
+
+Two music library fixes:
+
+- **Scanner now actually reads tags + cover art.** Symptom
+  before: titles like `10 Years Of NCS [8-OtWif8Z4A]`, no
+  artist, generic placeholder covers everywhere even on files
+  with proper ID3 tags + embedded artwork.
+
+  Cause: `music-metadata` was marked as
+  `serverComponentsExternalPackages` in `next.config.mjs` so Next
+  doesn't bundle it, but Next 14's tracer doesn't reliably copy
+  ESM-only externals into `.next/standalone`. At runtime the
+  lazy `await import("music-metadata")` threw `MODULE_NOT_FOUND`
+  and the scanner silently fell back to filename-only.
+
+  Fix: the runner stage of the Dockerfile now `npm install`s
+  `music-metadata` directly into the runtime image. Failures to
+  load it also now surface in the music engine's `lastError`
+  field so this class of bug isn't silent.
+
+- **Scan prunes missing files.** Before, `scanLibrary()` upserted
+  every file it found but never removed rows for files that
+  disappeared. Deleted tracks lingered in the library forever
+  and the count only ever climbed. The scanner now diffs the
+  in-DB rows against the on-disk file set and deletes the
+  orphans in the same pass.
+
+After upgrading, click **Rescan** in the Music tab once. Tag-
+parsed metadata + embedded covers will populate, and any
+ghost entries from deleted files will be removed. Manually-
+edited tracks (manual: true) are still preserved across scans.
+
 ## 1.8.1
 
 - **Music scene falls back to the broadcaster's logo** for cover

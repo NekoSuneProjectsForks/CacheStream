@@ -53,6 +53,18 @@ COPY --from=builder --chown=nextjs:nextjs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nextjs /app/.next/static    ./.next/static
 COPY --from=builder --chown=nextjs:nextjs /app/public          ./public
 
+# music-metadata is in `serverComponentsExternalPackages` in
+# next.config.mjs, which tells Next not to bundle it — but Next 14's
+# tracer doesn't reliably copy ESM-only externals into
+# .next/standalone, so they go missing at runtime and
+# `await import("music-metadata")` throws MODULE_NOT_FOUND. The
+# library scanner then silently falls back to filename-only.
+#
+# Fix: install it fresh into the runner stage's node_modules. Tiny
+# (~200KB + deps) and avoids the brittle "copy every transitive dep
+# by name" approach.
+RUN npm install --omit=dev --prefix /app --no-audit --no-fund --no-save music-metadata@^7.14.0
+
 # Writable mount points. The entrypoint re-chowns them at run
 # time too, in case the volume init left them as root:root.
 RUN mkdir -p /app/data /app/audio /app/media/music /app/media/vods \

@@ -164,14 +164,18 @@ class MusicEngine {
       if (!stat.isDirectory()) return [];
     } catch { return []; }
 
-    // Lazy-load music-metadata so a missing optional dep doesn't
-    // break the rest of the music engine.
+    // Lazy-load music-metadata. Surface the failure to the panel
+    // (lastError) so users notice if their scans are filename-only
+    // because of a missing dep — silent fallback used to mean
+    // "library full of [ABCDEF123]-style filenames forever".
     let parseFile: ((file: string) => Promise<any>) | null = null;
     try {
       const mm = await import("music-metadata");
       parseFile = (file) => mm.parseFile(file, { skipCovers: false, duration: true });
-    } catch (err) {
-      console.warn("[music] music-metadata unavailable, falling back to filename-only:", err);
+    } catch (err: any) {
+      const msg = `music-metadata unavailable — scans are filename-only. (${err?.message || err})`;
+      console.warn("[music]", msg);
+      this.lastError = msg;
     }
 
     const coversDir = path.join(config.runtime.dataDir, "covers");
@@ -233,6 +237,22 @@ class MusicEngine {
       });
       out.push(track);
     }
+
+    // Prune rows for files that no longer exist on disk. Without
+    // this, deleting files from the library directory left ghost
+    // entries in the panel forever — the library would only ever
+    // grow. Manually-edited tracks (manual: true) are also pruned;
+    // if the user wants to keep them, they need to keep the file.
+    const presentIds = new Set(out.map((t) => t.id));
+    const allRows = getStore().listMusicTracks();
+    let pruned = 0;
+    for (const row of allRows) {
+      if (!presentIds.has(row.id)) {
+        getStore().removeMusicTrack(row.id);
+        pruned++;
+      }
+    }
+    if (pruned > 0) console.log(`[music] scan pruned ${pruned} missing track(s)`);
 
     return out;
   }
