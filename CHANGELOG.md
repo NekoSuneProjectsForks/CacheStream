@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.7.1
+
+Fixes the boot-loop introduced by v1.7.0's `.env` slim-down.
+
+- **`INTERNAL_API_TOKEN` is now actually auto-generated**.
+  v1.7.0 docs claimed it was, but `config.js` still required it
+  via `required()` and the streamer crash-looped on every fresh
+  deploy.
+- Both containers' entrypoints now bootstrap the token via a
+  shared file at `/app/audio/.internal-api-token`:
+  - **Web container** writes the token (from `.env`, an existing
+    file, or freshly generated) and exports it to its own env
+    before exec'ing Node.
+  - **Streamer container** waits up to 30 s for the file to
+    appear, reads it, exports to env, then starts Node.
+- If `INTERNAL_API_TOKEN` is set in `.env`, both containers
+  honour it as before — no behaviour change for pinned deploys.
+
+If you saw `streamer failed to start: Missing required
+environment variable: INTERNAL_API_TOKEN` after upgrading to
+1.7.0, rebuild with 1.7.1 and it'll just work.
+
 ## 1.7.0
 
 The "you should never have to touch .env again" release.
