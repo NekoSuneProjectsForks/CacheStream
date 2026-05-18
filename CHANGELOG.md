@@ -1,5 +1,47 @@
 # Changelog
 
+## 1.8.0
+
+Chat is now Helix end-to-end. The hand-rolled IRC client + IRC
+WebSocket transport are gone. AI Pet scene also gained an
+always-visible command help bar.
+
+### Helix chat migration
+
+- **Receive**: `channel.chat.message` + `channel.chat.notification`
+  added to the EventSub WebSocket client. Re-emits each message
+  on the `chat` bus topic in the same `{ type, login, name,
+  message, isMod, isSub, id }` shape the games / commands /
+  AutoMod were already consuming, so downstream code is
+  untouched.
+- **Send**: `POST /helix/chat/messages`. Replaces the old IRC
+  PRIVMSG over WebSocket. `sendChat(text)` keeps its synchronous
+  signature so call sites don't have to be rewritten — errors
+  are logged.
+- **Scopes**: added `user:bot`, `user:read:chat`, `user:write:chat`.
+  Legacy `chat:read` + `chat:edit` still requested so users
+  mid-migration keep working until they re-login (the wizard's
+  missing-scopes detector will nudge them).
+- **Removed**: the ~250 lines of IRC WebSocket client + hand-
+  rolled tag/prefix parser in `lib/twitch/chat.ts`.
+- One less long-lived TCP connection: the EventSub WS we already
+  keep alive for follows/subs/cheers/raids now carries chat too.
+
+### UI
+
+- **AI Pet scene** now shows a persistent command help bar:
+  `!feed · !pet · !play · !sleep · !teach · !hit`. Datacenter
+  already had its equivalent; this matches the style.
+
+### Migration note
+
+Existing operators **must re-login** after upgrading so their
+token picks up the new `user:bot` / `user:read:chat` /
+`user:write:chat` scopes. The Status tab / chat panel will
+surface a "missing scopes — please re-login" warning until that
+happens. No data migration is required; just a fresh OAuth
+roundtrip.
+
 ## 1.7.6
 
 Fixes a race in the chat + EventSub clients that caused every

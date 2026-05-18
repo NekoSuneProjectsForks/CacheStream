@@ -61,6 +61,15 @@ export const OAUTH_SCOPES = [
   "moderator:manage:banned_users",
   "moderator:manage:chat_messages",
   "moderator:read:followers",
+  // Helix chat scopes — replace the legacy IRC scopes (chat:read +
+  // chat:edit). v1.8.0 moved chat off IRC over WebSocket onto
+  // EventSub (channel.chat.message) + Helix (POST /chat/messages).
+  // Kept the legacy scopes alongside for now so a user who's mid-
+  // migration with an old token still has working chat until they
+  // re-login; the missing-scopes detector pulls them in.
+  "user:bot",
+  "user:read:chat",
+  "user:write:chat",
   "chat:read",
   "chat:edit",
 ] as const;

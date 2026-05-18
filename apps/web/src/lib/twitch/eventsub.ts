@@ -22,6 +22,9 @@ import { config } from "../config";
 import { getStore } from "../store";
 import { getAccessToken, isRefreshTokenDead } from "./tokens";
 import { publish } from "../bus";
+import { runCommandIfMatch } from "../commands";
+import { evaluateAutoMod } from "../automod";
+import { sendChat } from "./chat";
 
 const EVENTSUB_URL = "wss://eventsub.wss.twitch.tv/ws";
 const SUB_URL = "https://api.twitch.tv/helix/eventsub/subscriptions";
@@ -33,6 +36,11 @@ const SUBSCRIPTIONS: Array<{ type: string; version: string; conditionFor: (id: s
   { type: "channel.subscription.message",version: "1", conditionFor: (id) => ({ broadcaster_user_id: id }) },
   { type: "channel.cheer",               version: "1", conditionFor: (id) => ({ broadcaster_user_id: id }) },
   { type: "channel.raid",                version: "1", conditionFor: (id) => ({ to_broadcaster_user_id: id }) },
+  // v1.8.0 chat-on-EventSub. Replaces the old IRC-over-WebSocket
+  // client. user_id is the chatter we're authenticating as — in
+  // CacheStream that's always the broadcaster themselves (own-bot).
+  { type: "channel.chat.message",        version: "1", conditionFor: (id) => ({ broadcaster_user_id: id, user_id: id }) },
+  { type: "channel.chat.notification",   version: "1", conditionFor: (id) => ({ broadcaster_user_id: id, user_id: id }) },
 ];
 
 type State = "idle" | "connecting" | "connected" | "closed";
@@ -133,6 +141,20 @@ class EventSubClient {
     if (type === "notification") {
       const subType = env.metadata.subscription_type;
       const event = env.payload.event;
+
+      // Chat messages go to a different bus topic + DB shape than
+      // alert events. They drive in-stream games (pet, datacenter),
+      // custom commands, and AutoMod — none of which need to know
+      // that the transport is EventSub vs the legacy IRC client.
+      if (subType === "channel.chat.message") {
+        this._handleChatMessage(event);
+        return;
+      }
+      if (subType === "channel.chat.notification") {
+        this._handleChatNotification(event);
+        return;
+      }
+
       getStore().appendChatLog({
         at: Date.now(), kind: "event",
         userLogin: event.user_login || event.from_broadcaster_user_login || null,
@@ -206,6 +228,72 @@ class EventSubClient {
       this.reconnectTimer = null;
       this._connect();
     }, delay);
+  }
+
+  /**
+   * channel.chat.message — replaces the old IRC PRIVMSG handler.
+   * Fan-out: chat log + bus (so the panel + games hear it) +
+   * custom-commands engine + AutoMod.
+   */
+  private _handleChatMessage(e: any): void {
+    const login    = e.chatter_user_login || null;
+    const userName = e.chatter_user_name  || login;
+    const text     = e.message?.text || "";
+    const msgId    = e.message_id || null;
+    const color    = e.color || null;
+    // Helix badges arrive as [{ set_id, id, info }]. Flatten to the
+    // IRC-style "moderator/1,subscriber/3" string the rest of the
+    // UI already knows how to render, and so the mod/sub detectors
+    // below still work whether we re-emitted from old or new chat.
+    const badges = Array.isArray(e.badges)
+      ? e.badges.map((b: any) => `${b.set_id}/${b.id || "1"}`).join(",")
+      : null;
+
+    getStore().appendChatLog({
+      at: Date.now(), kind: "msg",
+      userLogin: login, userName,
+      color, badges, message: text,
+      emotes: null,
+    });
+
+    const isMod = /(^|,)moderator\//.test(badges || "") || e.message_type === "channel_points_highlighted";
+    const isSub = /(^|,)subscriber\//.test(badges || "") || /(^|,)founder\//.test(badges || "");
+
+    const event = {
+      type: "msg",
+      id: msgId,
+      login, name: userName, color, badges,
+      message: text,
+      isMod, isSub,
+    };
+    publish("chat", event);
+
+    if (login) {
+      Promise.resolve(runCommandIfMatch(event, (reply) => sendChat(reply)))
+        .catch((err) => console.warn("[eventsub] command handler error:", err));
+    }
+    if (login && msgId) {
+      Promise.resolve(evaluateAutoMod(event))
+        .catch((err) => console.warn("[eventsub] automod error:", err));
+    }
+  }
+
+  /**
+   * channel.chat.notification — covers subs, raids-in-chat, host
+   * announcements, bits-via-chat, etc. Old IRC USERNOTICE
+   * equivalent. We forward to the chat log + bus so the panel's
+   * chat tab still shows these inline.
+   */
+  private _handleChatNotification(e: any): void {
+    const text = e.message?.text || e.system_message || e.notice_type || "";
+    getStore().appendChatLog({
+      at: Date.now(), kind: "event",
+      userLogin: e.chatter_user_login || null,
+      userName:  e.chatter_user_name  || null,
+      color: null, badges: null,
+      message: text, emotes: null,
+    });
+    publish("chat", { type: "event", noticeType: e.notice_type, message: text });
   }
 }
 

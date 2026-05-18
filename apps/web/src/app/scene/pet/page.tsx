@@ -109,11 +109,20 @@ export default function PetScene() {
           color: rgba(230,247,255,.45);
         }
         .feed {
-          position: absolute; bottom: 18px; left: 24px;
+          position: absolute; bottom: 48px; left: 24px;
           font-size: 11px; max-width: 40%;
           color: rgba(230,247,255,.55);
         }
         .feed div { padding: 2px 0; }
+        .help {
+          position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%);
+          font-size: 11px; letter-spacing: .25em; text-transform: uppercase;
+          color: rgba(230,247,255,.55);
+          padding: 6px 14px; border: 1px solid rgba(0,240,255,.2); border-radius: 4px;
+          background: rgba(10,13,24,.55); backdrop-filter: blur(2px);
+          white-space: nowrap;
+        }
+        .help b { color: #00f0ff; font-weight: 700; }
         .loading { color: rgba(230,247,255,.4); font-size: 14px; letter-spacing: .3em; text-transform: uppercase; }
       `}</style>
 
@@ -132,8 +141,11 @@ export default function PetScene() {
           <div className="meta">{mood} · age {fmtAge(s.ageMinutes)}</div>
           <div className="feed">
             {recent.length === 0
-              ? <div>say <code>!feed !pet !play</code> in chat</div>
+              ? <div>waiting for the chat to interact…</div>
               : recent.map((m, i) => <div key={i}>★ {m.detail}</div>)}
+          </div>
+          <div className="help">
+            <b>!feed</b> · <b>!pet</b> · <b>!play</b> · <b>!sleep</b> · <b>!teach</b> · <b>!hit</b>
           </div>
         </div>
 
