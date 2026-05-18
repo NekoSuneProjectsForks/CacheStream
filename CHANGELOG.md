@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.9.2
+
+Build hotfix — the runner-stage `npm install music-metadata`
+hack from v1.8.2 broke offline / flaky-DNS Pi builds with:
+
+  npm error code EAI_AGAIN
+  request to https://registry.npmjs.org/hls.js failed
+
+(The runner stage was reading the builder's package.json and
+trying to reconcile the new hls.js dep too.)
+
+Root cause: `music-metadata` was in
+`serverComponentsExternalPackages` so Next wouldn't bundle it,
+which meant we had to install it again in the runner stage to
+have it available at runtime. Worked but added a second network
+round-trip during every build.
+
+Fix: removed `music-metadata` from `serverComponentsExternalPackages`
+so Next bundles it like any other dep. The runner stage now
+contains zero `npm install` calls — pure file copies from the
+builder. Offline rebuilds work. Pi DNS hiccups can't break the
+build any more.
+
 ## 1.9.1
 
 GHCR build hotfix — v1.9.0's release workflow failed to build

@@ -24,7 +24,17 @@ const nextConfig = {
   // `ownerRoute`-wrapped API call invoke; the module-level guard
   // makes it idempotent.
   experimental: {
-    serverComponentsExternalPackages: ["better-sqlite3", "ws", "music-metadata"],
+    // music-metadata removed from externals in v1.9.2. Letting Next
+    // bundle it means it travels with the route bundle into
+    // .next/standalone like any other dep — avoids the runner-stage
+    // `npm install` hack we used in v1.8.2 which broke offline Pi
+    // builds when DNS to registry.npmjs.org flaked.
+    //
+    // Why it was external before: older versions of the package
+    // pulled in platform-y file-stream stuff that webpack didn't
+    // like. music-metadata@7 is ESM-clean and Next 14.2.15's
+    // bundler handles it without complaint.
+    serverComponentsExternalPackages: ["better-sqlite3", "ws"],
     // Default body limit for server actions is 1MB, way too low for
     // VOD / FLAC uploads. Multipart route handlers use a separate
     // mechanism but bumping this avoids surprises in any future
