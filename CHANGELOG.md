@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.8.1
+
+- **Music scene falls back to the broadcaster's logo** for cover
+  art when there's no track-embedded image. Cascade is now:
+  track cover → broadcaster logo (from Branding tab) → built-in
+  ♫ placeholder. Radio mode (which has no track-level artwork
+  at all) now also shows the logo by default.
+
 ## 1.8.0
 
 Chat is now Helix end-to-end. The hand-rolled IRC client + IRC

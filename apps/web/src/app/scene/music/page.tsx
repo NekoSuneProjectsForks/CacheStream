@@ -168,7 +168,15 @@ export default function MusicScene() {
   }, [mode]);
 
   const hasTrack = !!now?.trackId;
-  const coverUrl = hasTrack ? `/api/music/cover/${now!.trackId}` : null;
+  // Cover-art cascade:
+  //   1. Track-embedded cover (when a library track has one)
+  //   2. Broadcaster's uploaded logo (Branding tab) — fits radio
+  //      mode where there's no track-level art at all, and library
+  //      tracks missing artwork
+  //   3. Built-in ♫ placeholder (rendered by the .cover-placeholder
+  //      div when the <img> fails — covers the case where no logo
+  //      has been uploaded yet either)
+  const coverUrl = hasTrack ? `/api/music/cover/${now!.trackId}` : "/api/branding/logo";
 
   return (
     <>
@@ -323,14 +331,26 @@ export default function MusicScene() {
         <div className="top">
           <div className="cover-wrap">
             <div className="vinyl" />
-            {coverUrl ? (
-              <img className="cover" src={coverUrl} alt="" onError={(e) => {
-                (e.currentTarget as HTMLImageElement).style.display = "none";
-                (e.currentTarget.nextElementSibling as HTMLElement | null)?.style.removeProperty("display");
-              }} />
-            ) : null}
-            {/* fallback rendered when no cover OR img fails: */}
-            <div className="cover-placeholder" style={{ display: coverUrl ? "none" : "flex", position: coverUrl ? "absolute" : "relative", inset: coverUrl ? "0" : undefined }}>♫</div>
+            <img
+              className="cover"
+              src={coverUrl}
+              alt=""
+              onError={(e) => {
+                // Track cover failed (404 / missing). Step down the
+                // fallback chain: try the broadcaster's logo next;
+                // if THAT also fails, hide the img and reveal the
+                // ♫ placeholder beneath.
+                const img = e.currentTarget as HTMLImageElement;
+                const logoUrl = "/api/branding/logo";
+                if (!img.src.endsWith(logoUrl)) {
+                  img.src = logoUrl;
+                  return;
+                }
+                img.style.display = "none";
+                (img.nextElementSibling as HTMLElement | null)?.style.removeProperty("display");
+              }}
+            />
+            <div className="cover-placeholder" style={{ display: "none", position: "absolute", inset: 0 }}>♫</div>
           </div>
 
           <div className="meta">
