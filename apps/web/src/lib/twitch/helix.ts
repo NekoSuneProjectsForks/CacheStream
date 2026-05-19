@@ -161,6 +161,55 @@ export async function fetchStreamKey(broadcasterId: string): Promise<string | nu
   return res.data?.[0]?.stream_key || null;
 }
 
+/**
+ * List the broadcaster's recent past videos (archive type =
+ * regular broadcasts). Used by the Sources tab's VOD archive
+ * picker.
+ *
+ *   GET /helix/videos?user_id=…&type=archive&first=N
+ */
+export interface TwitchVideo {
+  id: string;
+  user_id: string;
+  user_login: string;
+  user_name: string;
+  title: string;
+  description: string;
+  created_at: string;
+  published_at: string;
+  url: string;
+  thumbnail_url: string;
+  viewable: "public" | "private";
+  view_count: number;
+  language: string;
+  type: "upload" | "archive" | "highlight";
+  /** Twitch returns "1h2m3s" — caller can parse if needed. */
+  duration: string;
+}
+
+export async function listUserVideos(userId: string, opts?: {
+  first?: number;
+  type?: "archive" | "highlight" | "upload" | "all";
+}): Promise<TwitchVideo[]> {
+  const res = await helix<{ data: TwitchVideo[] }>("GET", "/videos", {
+    query: {
+      user_id: userId,
+      first:   String(opts?.first ?? 20),
+      type:    opts?.type ?? "archive",
+    },
+  });
+  return res.data || [];
+}
+
+/** Parse Twitch's "1h2m3s" duration → total seconds. */
+export function parseTwitchDuration(d: string): number {
+  const m = d.match(/^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/);
+  if (!m) return 0;
+  return (parseInt(m[1] || "0", 10) * 3600)
+       + (parseInt(m[2] || "0", 10) * 60)
+       + (parseInt(m[3] || "0", 10));
+}
+
 // ---- Chat moderation -------------------------------------------
 
 /** Delete a single chat message by id. */

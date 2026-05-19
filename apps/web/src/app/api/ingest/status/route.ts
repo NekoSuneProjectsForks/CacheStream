@@ -1,37 +1,40 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { kvGet, kvSet } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
 /**
- * GET /api/ingest/status
+ * GET /api/ingest/status[?k=<key>]
  *
- * Returns the operator-configured RTMP ingest key + whether a
- * live HLS playlist is currently being produced by the `ingest`
- * nginx-rtmp container.
+ * Returns the configured RTMP ingest key + whether a live HLS
+ * playlist is being produced by the nginx-rtmp sidecar for that
+ * key. When `?k=` is omitted, falls back to the legacy default
+ * key (kv `ingest_stream_key`, typically "cache").
  *
  * Liveness check is a cheap HEAD against the playlist on the
- * sidecar's HTTP port. Coalesces well — even if the scene + the
- * panel poll this every couple of seconds, the nginx side is
- * basically free.
+ * sidecar's internal HTTP port. Coalesces well — even if the
+ * scene + the panel poll this every couple of seconds, the
+ * nginx side is basically free.
  *
- * Public route (the scene needs it without an auth cookie, since
- * scenes load in the streamer's headless Chromium, not the
- * operator's logged-in browser).
+ * Public route (the scene needs it without an auth cookie).
  */
-export async function GET() {
-  // Default key "cache" so a fresh deploy is playable without
-  // first visiting the panel. The operator can rotate it later.
-  const key = kvGet("ingest_stream_key") || "cache";
+export async function GET(req: NextRequest) {
+  const url = new URL(req.url);
+  const requested = (url.searchParams.get("k") || "").trim();
+
+  // Validate to avoid path traversal into the playlist filesystem.
+  const sanitized = requested && /^[A-Za-z0-9_-]{1,64}$/.test(requested)
+    ? requested
+    : null;
+  const key = sanitized || (kvGet("ingest_stream_key") || "cache");
   const enabled = (kvGet("ingest_enabled") ?? "1") === "1";
 
-  // The ingest sidecar exposes the HLS playlist over the internal
-  // compose network (host: "ingest", port 8080). Browsers loading
-  // the /scene/ingest page from the web container can also reach
-  // it because docker compose DNS resolves service names.
-  const internalBase = "http://ingest:8080";
-  const playlistPath = `/hls/${key}.m3u8`;
-  const hlsUrlInternal = `${internalBase}${playlistPath}`;
+  // Per-key started-at tracking. Each multi-key key gets its own
+  // kv slot so the "started at" timestamp reflects when THIS key
+  // actually went live, not the first key that ever did.
+  const startedAtKey = `ingest_started_at:${key}`;
+
+  const hlsUrlInternal = `http://ingest:8080/hls/${encodeURIComponent(key)}.m3u8`;
 
   let live = false;
   let startedAt: number | null = null;
@@ -39,14 +42,13 @@ export async function GET() {
     try {
       const r = await fetch(hlsUrlInternal, { method: "HEAD", cache: "no-store" });
       live = r.ok;
-      if (live) startedAt = Number(kvGet("ingest_started_at")) || Date.now();
-      else if (kvGet("ingest_started_at")) kvSet("ingest_started_at", "");
-    } catch {
-      live = false;
-    }
-    if (live && !kvGet("ingest_started_at")) {
-      kvSet("ingest_started_at", String(Date.now()));
-      startedAt = Date.now();
+    } catch { live = false; }
+
+    if (live) {
+      startedAt = Number(kvGet(startedAtKey)) || Date.now();
+      if (!kvGet(startedAtKey)) kvSet(startedAtKey, String(startedAt));
+    } else if (kvGet(startedAtKey)) {
+      kvSet(startedAtKey, "");
     }
   }
 

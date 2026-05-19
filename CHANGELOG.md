@@ -1,5 +1,64 @@
 # Changelog
 
+## 1.11.0
+
+New "Sources" tab — three new ways to bring external content
+into a scene.
+
+### Browser-source embeds
+
+Drop arbitrary URL widgets (Streamlabs / Stream Elements alert
+boxes, NightBot timers, donation tickers, custom Carbon
+widgets) into a sandboxed full-bleed scene. Each embed gets a
+stable slug-based scene URL you can promote to a preset.
+
+- New scene route: `/scene/embed/<slug>` renders one embed in a
+  `sandbox="allow-scripts allow-same-origin"` iframe so the
+  widget can't reach the panel's cookies or `/api/*` routes.
+- New API:
+  `GET / POST /api/embeds`, `GET / PATCH / DELETE /api/embeds/<slug>`
+  (GET is public-ish like other scene-supporting endpoints).
+- Sources tab section to add / preview / delete embeds and
+  one-click promote them to scene presets.
+
+### Twitch VOD archive (rerun-as-scene)
+
+Pulls your recent past broadcasts via Helix `GET /videos`.
+Pick one, click "Use as scene", and a preset is created that
+loads the Twitch embed player full-bleed. Useful for sleep
+streams, intermissions, or 24/7 reruns between live blocks.
+
+- New scene route: `/scene/vod/twitch/<id>` embeds the official
+  Twitch player with `parent=` set to both the docker DNS host
+  and the actual browser host (Twitch's embed accepts a
+  comma-separated list), so it works in the streamer's headless
+  Chromium AND in operator preview.
+- New API: `GET /api/twitch/vods` (owner-only) lists the
+  broadcaster's last 20 archive-type videos with thumbnails,
+  duration, and published-at.
+
+### Multi-key RTMP ingest
+
+The v1.9.0 RTMP ingest accepted exactly one key ("cache" by
+default). v1.11.0 adds a registry — push from multiple encoders
+(`obs`, `phone`, `screen`, etc.) simultaneously and switch
+between them as scenes.
+
+- The legacy default key is unchanged (single-key flow keeps
+  working). The multi-key registry is purely additive.
+- New API:
+  `GET / POST /api/ingest/keys`,
+  `DELETE /api/ingest/keys/<key>`
+- `/scene/ingest` now accepts `?k=<key>` to play back a specific
+  key's feed; same scene route, just different query for each
+  preset. `/api/ingest/status` honours the same `?k=` param.
+
+### Sources tab
+
+A single new tab in the admin shell hosts all three subsystems.
+Each section saves immediately; adding a source doesn't take
+effect on the broadcast until you switch to / reload the scene.
+
 ## 1.10.2
 
 Two-part hotfix: RTMP ingest latency down from 60-120 s to

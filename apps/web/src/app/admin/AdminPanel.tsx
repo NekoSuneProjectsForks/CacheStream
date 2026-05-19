@@ -19,6 +19,7 @@ import { MusicTab } from "./tabs/MusicTab";
 import { VodsTab } from "./tabs/VodsTab";
 import { GamesTab } from "./tabs/GamesTab";
 import { BrandingTab } from "./tabs/BrandingTab";
+import { SourcesTab } from "./tabs/SourcesTab";
 
 interface SessionInfo { login: string; displayName: string }
 interface BrandingSnapshot {
@@ -42,13 +43,14 @@ interface Props {
 }
 
 type TabKey =
-  | "status" | "studio" | "scenes" | "info" | "chat"
+  | "status" | "studio" | "scenes" | "sources" | "info" | "chat"
   | "commands" | "alerts" | "music" | "vods" | "games" | "branding";
 
 const TABS: Array<{ key: TabKey; label: string }> = [
   { key: "status",   label: "Status" },
   { key: "studio",   label: "Studio" },
   { key: "scenes",   label: "Scenes" },
+  { key: "sources",  label: "Sources" },
   { key: "info",     label: "Stream Info" },
   { key: "chat",     label: "Chat" },
   { key: "commands", label: "Commands / AutoMod" },
@@ -128,6 +130,7 @@ export function AdminPanel(props: Props) {
         )}
         {tab === "studio"   && <StudioTab />}
         {tab === "scenes"   && <ScenesTab />}
+        {tab === "sources"  && <SourcesTab />}
         {tab === "info"     && <StreamInfoTab />}
         {tab === "chat"     && <ChatTab />}
         {tab === "commands" && <CommandsTab />}

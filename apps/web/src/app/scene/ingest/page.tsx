@@ -42,11 +42,20 @@ export default function IngestScene() {
 
   // Poll ingest status so we can show "waiting" when the encoder
   // isn't pushing yet, and auto-load the playlist when it goes live.
+  //
+  // Multi-key support: when the scene URL is /scene/ingest?k=<key>,
+  // we forward that key to the status endpoint so each key's
+  // scene plays back its own feed. Falls back to the default key
+  // when ?k is omitted (single-key flow from v1.9.0).
   useEffect(() => {
     let cancelled = false;
+    const k = typeof window !== "undefined"
+      ? new URLSearchParams(window.location.search).get("k") || ""
+      : "";
+    const url = k ? `/api/ingest/status?k=${encodeURIComponent(k)}` : "/api/ingest/status";
     const tick = async () => {
       try {
-        const r = await fetch("/api/ingest/status", { cache: "no-store" });
+        const r = await fetch(url, { cache: "no-store" });
         if (!r.ok) return;
         const data = await r.json();
         if (!cancelled) setStatus(data);
