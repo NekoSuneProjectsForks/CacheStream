@@ -671,12 +671,12 @@ class Streamer extends EventEmitter {
   async _startScreencast() {
     this.client = await this.page.target().createCDPSession();
 
-    this.client.on("Page.screencastFrame", async ({ data, sessionId }) => {
-      try {
-        await this.client.send("Page.screencastFrameAck", { sessionId });
-      } catch {
-        return;
-      }
+    this.client.on("Page.screencastFrame", ({ data, sessionId }) => {
+      // Fire-and-forget: ack immediately so Chromium can begin
+      // rendering the next frame without waiting for our CDP reply
+      // round-trip (~5-15 ms on a local socket). Awaiting it was
+      // serialising every frame and was the primary source of lag.
+      this.client.send("Page.screencastFrameAck", { sessionId }).catch(() => {});
 
       if (!this.ffmpeg || !this.ffmpeg.stdin.writable) return;
 
