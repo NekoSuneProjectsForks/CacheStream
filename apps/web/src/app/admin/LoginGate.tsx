@@ -23,7 +23,9 @@ export function LoginGate({ owner, loginUrl }: Props) {
             <div>
               <div className="label">Claimed by</div>
               <div className="value">{owner.displayName}</div>
-              <div className="hint">Only this Twitch account can sign in.</div>
+              <div className="hint">
+                Owner — or anyone invited via a staff link — can sign in here.
+              </div>
             </div>
           </div>
         ) : (

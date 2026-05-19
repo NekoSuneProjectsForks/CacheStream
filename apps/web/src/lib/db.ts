@@ -268,6 +268,55 @@ const SCHEMA_VERSIONS: Array<(db: Database.Database) => void> = [
       );
     `);
   },
+
+  // ---- v5: 1.13 — moderators + invites ------------------------
+  //
+  // Multi-broadcaster support. The owner can mint single-use
+  // invite codes; an invitee logs in via Twitch OAuth carrying
+  // the code on a cookie, which adds them to `moderators`.
+  // The session table is unchanged — sessions just identify
+  // "which Twitch user is here", and the authz layer checks
+  // owner OR moderator membership.
+  //
+  // We DON'T mirror moderator OAuth tokens. The broadcaster's
+  // tokens stay the channel's identity for Helix calls (sending
+  // chat AS the broadcaster, etc.); mods just drive the panel
+  // and the broadcaster's session-bound permissions flow through.
+  (db) => {
+    db.exec(`
+      -- One row per moderator. Identity is Twitch user id; login
+      -- is mirrored for log readability + so an owner inviting by
+      -- login can be reconciled when the moderator first signs in.
+      CREATE TABLE IF NOT EXISTS moderators (
+        twitch_user_id  TEXT PRIMARY KEY,
+        twitch_login    TEXT NOT NULL,
+        display_name    TEXT NOT NULL,
+        added_at        INTEGER NOT NULL,
+        added_by_login  TEXT,
+        -- Reserved for future per-mod permission scopes (currently
+        -- all mods get the staff-tier capability set). Stored as a
+        -- JSON array of scope strings; empty = default staff perms.
+        scopes_json     TEXT NOT NULL DEFAULT '[]'
+      );
+
+      -- Invite codes the owner mints from the Staff tab. Codes are
+      -- single-use + carry an optional expiry. When an invitee logs
+      -- in with the code on their cookie, the OAuth callback
+      -- consumes the row (status = 'consumed' + consumed_by_*)
+      -- and inserts into moderators.
+      CREATE TABLE IF NOT EXISTS staff_invites (
+        code              TEXT PRIMARY KEY,
+        label             TEXT,             -- "for jane (mod)" etc.
+        created_at        INTEGER NOT NULL,
+        created_by_login  TEXT,
+        expires_at        INTEGER,          -- nullable = no expiry
+        status            TEXT NOT NULL,    -- 'pending' | 'consumed' | 'revoked'
+        consumed_at       INTEGER,
+        consumed_by_id    TEXT,
+        consumed_by_login TEXT
+      );
+    `);
+  },
 ];
 
 function applySchema(db: Database.Database): void {

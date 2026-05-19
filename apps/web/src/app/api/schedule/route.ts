@@ -1,18 +1,18 @@
 import { NextResponse } from "next/server";
-import { ownerRoute, readJson } from "@/lib/api-helpers";
+import { staffRoute, readJson } from "@/lib/api-helpers";
 import { getStore, type ScheduleEntry } from "@/lib/store";
 import { ensureSchedulerStarted } from "@/lib/scheduler";
 
 export const dynamic = "force-dynamic";
 
 /** GET /api/schedule — list entries. Also boots the scheduler tick. */
-export const GET = ownerRoute(async () => {
+export const GET = staffRoute(async () => {
   ensureSchedulerStarted();
   return NextResponse.json({ schedule: getStore().listSchedule() });
 });
 
 /** POST /api/schedule { enabled, scenePresetId, overlaySetId?, at, days } */
-export const POST = ownerRoute(async (req) => {
+export const POST = staffRoute(async (req) => {
   const body = await readJson<Omit<ScheduleEntry, "id">>(req);
   if (!body.scenePresetId) {
     return NextResponse.json({ error: "scenePresetId required" }, { status: 400 });

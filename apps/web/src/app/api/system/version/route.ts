@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { ownerRoute } from "@/lib/api-helpers";
+import { staffRoute } from "@/lib/api-helpers";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -78,7 +78,7 @@ function isNewer(latest: string, current: string): boolean {
   return lc > cc;
 }
 
-export const GET = ownerRoute(async () => {
+export const GET = staffRoute(async () => {
   // Pull current from the standalone package.json. process.env.npm_*
   // isn't reliable under Next standalone, so we read the file
   // directly. Path differs between dev (./package.json) and standalone

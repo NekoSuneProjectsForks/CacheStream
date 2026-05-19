@@ -1,6 +1,6 @@
 import path from "node:path";
 import { NextResponse } from "next/server";
-import { ownerRoute } from "@/lib/api-helpers";
+import { staffRoute } from "@/lib/api-helpers";
 import { getStore } from "@/lib/store";
 import { streamer } from "@/lib/streamer-client";
 
@@ -15,7 +15,7 @@ interface Ctx { params: { id: string } }
  * path inside the streamer container (which mounts the same
  * ./media/vods volume at /app/media/vods).
  */
-export const POST = ownerRoute(async (_req, ctx: Ctx) => {
+export const POST = staffRoute(async (_req, ctx: Ctx) => {
   const v = getStore().getVod(ctx.params.id);
   if (!v) return NextResponse.json({ error: "not_found" }, { status: 404 });
 

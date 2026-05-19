@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { ownerRoute } from "@/lib/api-helpers";
+import { staffRoute } from "@/lib/api-helpers";
 import { getStreamByUserId } from "@/lib/twitch/helix";
 import { getStore } from "@/lib/store";
 
@@ -22,7 +22,7 @@ export const dynamic = "force-dynamic";
  * Cheap to call — Helix caches /streams for ~10 seconds upstream,
  * so polling at 5-10 s is fine.
  */
-export const GET = ownerRoute(async () => {
+export const GET = staffRoute(async () => {
   const tokens = getStore().getTokens();
   if (!tokens) {
     return NextResponse.json({

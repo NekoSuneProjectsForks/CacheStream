@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { ownerRoute, readJson } from "@/lib/api-helpers";
+import { staffRoute, readJson } from "@/lib/api-helpers";
 import { getStore, type CustomSceneTemplate, type CustomSceneConfig } from "@/lib/store";
 import { isValidSlug, slugify } from "@/lib/slug";
 
@@ -10,7 +10,7 @@ const TEMPLATES: CustomSceneTemplate[] = [
 ];
 
 /** GET /api/scenes/custom — list every user-authored scene. */
-export const GET = ownerRoute(async () => {
+export const GET = staffRoute(async () => {
   return NextResponse.json({ scenes: getStore().listCustomScenes() });
 });
 
@@ -21,7 +21,7 @@ export const GET = ownerRoute(async () => {
  * Slug is auto-derived from the name when omitted. Slug collisions
  * get a numeric suffix.
  */
-export const POST = ownerRoute(async (req) => {
+export const POST = staffRoute(async (req) => {
   const body = await readJson<{
     name?: string;
     template?: string;

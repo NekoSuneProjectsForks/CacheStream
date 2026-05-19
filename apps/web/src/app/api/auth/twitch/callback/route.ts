@@ -64,11 +64,52 @@ export async function GET(req: NextRequest) {
   const store = getStore();
   store.claimOwnerIfUnset(user);
 
-  if (!store.isOwner({ id: user.id, login: user.login })) {
+  const isOwner = store.isOwner({ id: user.id, login: user.login });
+
+  // v1.13.0: if the user isn't the owner, check whether they
+  // arrived carrying an invite cookie. If so, consume it + add
+  // them as a moderator. If not (or the invite is invalid),
+  // fall through to the existing 403 deny page.
+  if (!isOwner) {
+    const inviteSigned = req.cookies.get("cs_invite")?.value;
+    const inviteCode = unsign(inviteSigned);
+    if (inviteCode) {
+      const result = store.consumeInvite(inviteCode, {
+        id: user.id,
+        login: user.login,
+        displayName: user.display_name || user.login,
+      });
+      if (!result.ok) {
+        const res = renderError(
+          `That invite is no longer valid (${escapeHtml(result.reason)}). ` +
+            `Ask the broadcaster for a fresh one.`,
+          403,
+        );
+        res.cookies.delete("cs_invite");
+        return res;
+      }
+      // Moderator accepted — issue a session, skip the token save
+      // (moderators don't replace the broadcaster's Helix identity),
+      // and bounce to /admin where the panel will show them their
+      // role badge.
+      const { sid: modSid, expiresAt: modExpiresAt } = store.createSession(user);
+      const res = NextResponse.redirect(`${config.web.publicUrl}/admin`);
+      res.cookies.delete(STATE_COOKIE);
+      res.cookies.delete("cs_oauth_origin");
+      res.cookies.delete("cs_invite");
+      res.cookies.set(
+        SESSION_COOKIE,
+        sign(modSid),
+        cookieOpts(modExpiresAt - Date.now()),
+      );
+      return res;
+    }
+
     return renderError(
       `This CacheStream instance is owned by another Twitch account. ` +
-        `Logged-in user <b>${escapeHtml(user.display_name || user.login)}</b> is not authorised.`,
-      403
+        `Logged-in user <b>${escapeHtml(user.display_name || user.login)}</b> is not authorised. ` +
+        `Ask the broadcaster for an invite link if you should have access.`,
+      403,
     );
   }
 
@@ -76,6 +117,9 @@ export async function GET(req: NextRequest) {
   const { sid, expiresAt } = store.createSession(user);
 
   // Persist broadcaster tokens for Helix + chat + EventSub use.
+  // We only do this on the owner branch — moderators authenticate
+  // with their OWN Twitch identity but their tokens are throwaway,
+  // since the broadcaster's tokens are what drive Helix calls.
   store.saveTokens({
     accessToken: token.access_token,
     refreshToken: token.refresh_token || null,
@@ -146,6 +190,7 @@ export async function GET(req: NextRequest) {
   const res = NextResponse.redirect(`${config.web.publicUrl}/admin`);
   res.cookies.delete(STATE_COOKIE);
   res.cookies.delete("cs_oauth_origin");
+  res.cookies.delete("cs_invite");
   res.cookies.set(
     SESSION_COOKIE,
     sign(sid),

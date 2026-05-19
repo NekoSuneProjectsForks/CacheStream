@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { ownerRoute } from "@/lib/api-helpers";
+import { staffRoute } from "@/lib/api-helpers";
 import { chatStatus, startChat, stopChat } from "@/lib/twitch/chat";
 import { eventSubStatus, startEventSub, stopEventSub } from "@/lib/twitch/eventsub";
 import { getStore } from "@/lib/store";
@@ -10,7 +10,7 @@ import { datacenter } from "@/lib/games/datacenter";
 export const dynamic = "force-dynamic";
 
 /** GET /api/chat/status — chat + eventsub connection state + scope check. */
-export const GET = ownerRoute(async () => {
+export const GET = staffRoute(async () => {
   const tokens = getStore().getTokens();
   return NextResponse.json({
     tokensPresent: !!tokens,
@@ -21,7 +21,7 @@ export const GET = ownerRoute(async () => {
 });
 
 /** POST /api/chat/status { action: "start"|"stop" } — start/stop chat + eventsub. */
-export const POST = ownerRoute(async (req) => {
+export const POST = staffRoute(async (req) => {
   const { action } = (await req.json().catch(() => ({}))) as { action?: string };
   if (action === "start") {
     // Games subscribe to the chat bus on first call — make sure

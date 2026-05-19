@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { ownerRoute } from "@/lib/api-helpers";
+import { staffRoute } from "@/lib/api-helpers";
 import { getStore } from "@/lib/store";
 import { listUserVideos, parseTwitchDuration } from "@/lib/twitch/helix";
 
@@ -16,7 +16,7 @@ export const dynamic = "force-dynamic";
  * including private/sub-only VODs the public channel page
  * wouldn't necessarily expose to anonymous visitors.
  */
-export const GET = ownerRoute(async () => {
+export const GET = staffRoute(async () => {
   const tokens = getStore().getTokens();
   if (!tokens) {
     return NextResponse.json([], { headers: { "Cache-Control": "no-store" } });

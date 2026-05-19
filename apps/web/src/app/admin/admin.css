@@ -287,3 +287,154 @@
   display: inline-block; margin-top: 1rem;
   color: var(--text-dim); font-size: .8rem;
 }
+
+/* =========================================================
+   v1.13.0 — Role badge + mobile responsive layout
+   ========================================================= */
+
+/* ---- Role badge (header) ---------------------------------- */
+.role-badge {
+  display: inline-block;
+  margin-left: .6rem;
+  padding: .15rem .55rem;
+  border-radius: 3px;
+  font-size: .62rem;
+  font-weight: 800;
+  letter-spacing: .22em;
+  vertical-align: 1px;
+  border: 1px solid currentColor;
+}
+.role-badge.role-owner {
+  color: var(--neon-cyan, #00f0ff);
+  background: rgba(0,240,255,.08);
+  box-shadow: 0 0 8px rgba(0,240,255,.35);
+}
+.role-badge.role-mod {
+  color: #facc15;
+  background: rgba(250,204,21,.08);
+}
+
+/* ---- Mobile nav toggle ----------------------------------- */
+.nav-toggle {
+  display: none;            /* desktop default — shown via media query below */
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: .4rem .7rem;
+  cursor: pointer;
+  font-size: 1.2rem;
+  line-height: 1;
+}
+.nav-toggle:hover { color: var(--neon-cyan); }
+
+/* ---- Breakpoint: tablet (under ~900px) ------------------- */
+@media (max-width: 900px) {
+  .admin-shell {
+    padding: 1.1rem .8rem 4rem;
+  }
+  /* Heavy multi-column layouts collapse to single column. The
+     panel's existing `.row.gap` flex containers wrap with
+     flex-wrap so the only thing we need to nudge here is the
+     header (which is justify-between with two flex children). */
+  .admin-head {
+    flex-wrap: wrap;
+    gap: .75rem;
+  }
+  .brand-row { flex: 1 1 auto; }
+  .head-right { flex-wrap: wrap; }
+  .brand { font-size: 1.25rem; }
+}
+
+/* ---- Breakpoint: phone (under ~700px) -------------------- */
+@media (max-width: 700px) {
+  .admin-shell {
+    max-width: 100%;
+    padding: .8rem .6rem 6rem;
+  }
+
+  /* Tab nav becomes a drawer. The toggle button (.nav-toggle)
+     shows; tabs collapse to a vertical list that's only visible
+     when navOpen=true. */
+  .nav-toggle { display: inline-block; }
+  .tab-nav {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+    border-bottom: none;
+    /* Drawer mechanics: max-height transition for a smooth open. */
+    max-height: 0;
+    overflow: hidden;
+    padding: 0;
+    transition: max-height .25s ease;
+    background: rgba(5,6,10,.85);
+    border-radius: 4px;
+    margin-top: .3rem;
+  }
+  .tab-nav.open {
+    max-height: 800px;
+    padding: .35rem;
+    border: 1px solid var(--line);
+  }
+  .tab {
+    text-align: left;
+    border-radius: 4px;
+    padding: .7rem .9rem;
+    font-size: .85rem;
+  }
+  .tab.active {
+    background: rgba(0,240,255,.08);
+    box-shadow: inset 3px 0 0 var(--neon-cyan, #00f0ff);
+  }
+
+  /* Header tightens: brand drops the logo if space is needed,
+     user info wraps under, logout stays the rightmost. */
+  .admin-head {
+    flex-direction: row;
+    align-items: center;
+  }
+  .brand-row { gap: .6rem; }
+  .brand-logo { height: 32px; max-width: 64px; }
+  .brand { font-size: 1.05rem; letter-spacing: .08em; }
+  .brand-sub { display: none; }   /* "control panel" subtitle drops on phone */
+  .head-right { gap: .5rem; }
+  .user { font-size: .75rem; }
+  .user-label { display: none; }  /* "SIGNED IN AS" label drops; just show the name */
+
+  /* Card padding tightens + headers stack. */
+  .card {
+    padding: .9rem .8rem .8rem;
+    border-radius: 4px;
+  }
+  .card-head {
+    flex-wrap: wrap;
+    gap: .4rem;
+  }
+
+  /* Status metrics: one column instead of auto-fit 180px minmax. */
+  .metrics {
+    grid-template-columns: 1fr 1fr;
+    gap: .4rem;
+  }
+
+  /* Button-stripped layouts wrap, but tap targets need to be
+     larger than the desktop .sm variant. Bump button heights. */
+  button, .btn-primary, .btn-ghost, .btn-danger {
+    min-height: 38px;
+    padding: .55rem .85rem;
+  }
+  .row.gap { gap: .5rem; }
+
+  /* Inputs/selects scale up to be tap-friendly. */
+  .input, select.input, textarea.input {
+    min-height: 38px;
+    font-size: 16px;          /* prevents iOS Safari zoom-on-focus */
+  }
+}
+
+/* ---- Breakpoint: small phone (under ~400px) -------------- */
+@media (max-width: 400px) {
+  .brand { font-size: .95rem; }
+  .role-badge { font-size: .56rem; padding: .1rem .4rem; }
+  .head-right form button { padding: .4rem .6rem; }
+}

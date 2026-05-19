@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
-import { ownerRoute, readJson } from "@/lib/api-helpers";
+import { staffRoute, readJson } from "@/lib/api-helpers";
 import { getStore } from "@/lib/store";
 import { getChannelInfo, updateChannelInfo, getStreamByUserId } from "@/lib/twitch/helix";
 
 export const dynamic = "force-dynamic";
 
 /** GET /api/twitch/channel — current title, category, tags, live state. */
-export const GET = ownerRoute(async () => {
+export const GET = staffRoute(async () => {
   const tokens = getStore().getTokens();
   if (!tokens) return NextResponse.json({ error: "no tokens; log in first" }, { status: 412 });
   const [channel, stream] = await Promise.all([
@@ -17,7 +17,7 @@ export const GET = ownerRoute(async () => {
 });
 
 /** PATCH /api/twitch/channel { title?, game_id?, tags?, broadcaster_language? } */
-export const PATCH = ownerRoute(async (req) => {
+export const PATCH = staffRoute(async (req) => {
   const tokens = getStore().getTokens();
   if (!tokens) return NextResponse.json({ error: "no tokens" }, { status: 412 });
   const body = await readJson<{ title?: string; game_id?: string; tags?: string[]; broadcaster_language?: string }>(req);

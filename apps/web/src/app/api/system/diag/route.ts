@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { ownerRoute } from "@/lib/api-helpers";
+import { staffRoute } from "@/lib/api-helpers";
 import { busListenerCounts } from "@/lib/bus";
 
 export const dynamic = "force-dynamic";
@@ -16,7 +16,7 @@ export const dynamic = "force-dynamic";
  *
  * Owner-only since it surfaces process internals.
  */
-export const GET = ownerRoute(async () => {
+export const GET = staffRoute(async () => {
   const mem = process.memoryUsage();
   return NextResponse.json({
     uptimeS: Math.round(process.uptime()),

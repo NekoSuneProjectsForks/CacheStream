@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
-import { ownerRoute, readJson } from "@/lib/api-helpers";
+import { staffRoute, readJson } from "@/lib/api-helpers";
 import { getStore } from "@/lib/store";
 import { musicEngine } from "@/lib/music";
 
 export const dynamic = "force-dynamic";
 
 /** GET /api/music/radio — list saved radio presets. */
-export const GET = ownerRoute(async () => {
+export const GET = staffRoute(async () => {
   return NextResponse.json({ presets: getStore().listRadioPresets() });
 });
 
@@ -16,7 +16,7 @@ export const GET = ownerRoute(async () => {
  *   { saveAs, url }        → save preset only (don't play)
  *   { presetId }           → play a saved preset
  */
-export const POST = ownerRoute(async (req) => {
+export const POST = staffRoute(async (req) => {
   const body = await readJson<{ url?: string; name?: string; saveAs?: string; presetId?: string }>(req);
   const store = getStore();
 

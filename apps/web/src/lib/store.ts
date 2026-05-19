@@ -27,6 +27,28 @@ export interface OwnerRecord {
   seeded?: boolean;
 }
 
+export interface ModeratorRecord {
+  twitchUserId: string;
+  twitchLogin: string;
+  displayName: string;
+  addedAt: number;
+  addedByLogin: string | null;
+  /** Reserved for future per-mod permission scopes; currently always []. */
+  scopes: string[];
+}
+
+export interface StaffInvite {
+  code: string;
+  label: string | null;
+  createdAt: number;
+  createdByLogin: string | null;
+  expiresAt: number | null;
+  status: "pending" | "consumed" | "revoked";
+  consumedAt: number | null;
+  consumedById: string | null;
+  consumedByLogin: string | null;
+}
+
 export interface SessionRecord {
   twitchUserId: string;
   login: string;
@@ -281,6 +303,172 @@ class Store {
          seeded         = 0
        WHERE id = 1`
     ).run(user.id, user.display_name || user.login, user.email || null);
+  }
+
+  // ---- Moderators + invites (v1.13.0) ---------------------------
+  //
+  // Multi-broadcaster support. The owner mints single-use invite
+  // codes; an invitee logs in via Twitch OAuth carrying the code
+  // on a cookie, the OAuth callback consumes the row and adds
+  // them to `moderators`. Mods then have staffRoute-level access
+  // (driving the panel, switching scenes, sending chat) without
+  // needing the broadcaster's password.
+
+  listModerators(): ModeratorRecord[] {
+    const rows = this.db.prepare(
+      "SELECT * FROM moderators ORDER BY added_at"
+    ).all() as any[];
+    return rows.map((r) => ({
+      twitchUserId:  r.twitch_user_id,
+      twitchLogin:   r.twitch_login,
+      displayName:   r.display_name,
+      addedAt:       r.added_at,
+      addedByLogin:  r.added_by_login,
+      scopes:        safeJson(r.scopes_json, []),
+    }));
+  }
+
+  isModerator(user: { id?: string | null; login?: string | null }): boolean {
+    if (!user) return false;
+    if (user.id) {
+      const r = this.db.prepare(
+        "SELECT 1 FROM moderators WHERE twitch_user_id = ?"
+      ).get(user.id);
+      if (r) return true;
+    }
+    if (user.login) {
+      const r = this.db.prepare(
+        "SELECT 1 FROM moderators WHERE twitch_login = ?"
+      ).get(String(user.login).toLowerCase());
+      if (r) return true;
+    }
+    return false;
+  }
+
+  /** Owner OR mod — the staffRoute() gate's authority check. */
+  isStaff(user: { id?: string | null; login?: string | null }): boolean {
+    return this.isOwner(user) || this.isModerator(user);
+  }
+
+  addModerator(args: {
+    twitchUserId: string;
+    twitchLogin: string;
+    displayName: string;
+    addedByLogin?: string | null;
+  }): ModeratorRecord {
+    this.db.prepare(
+      `INSERT OR REPLACE INTO moderators
+         (twitch_user_id, twitch_login, display_name, added_at, added_by_login, scopes_json)
+       VALUES (?, ?, ?, ?, ?, '[]')`
+    ).run(
+      args.twitchUserId,
+      String(args.twitchLogin).toLowerCase(),
+      args.displayName,
+      Date.now(),
+      args.addedByLogin || null,
+    );
+    return {
+      twitchUserId: args.twitchUserId,
+      twitchLogin:  String(args.twitchLogin).toLowerCase(),
+      displayName:  args.displayName,
+      addedAt:      Date.now(),
+      addedByLogin: args.addedByLogin || null,
+      scopes:       [],
+    };
+  }
+
+  removeModerator(twitchUserId: string): boolean {
+    return this.db.prepare(
+      "DELETE FROM moderators WHERE twitch_user_id = ?"
+    ).run(twitchUserId).changes > 0;
+  }
+
+  // ---- Invites --------------------------------------------------
+
+  listInvites(): StaffInvite[] {
+    const rows = this.db.prepare(
+      "SELECT * FROM staff_invites ORDER BY created_at DESC"
+    ).all() as any[];
+    return rows.map(mapInvite);
+  }
+
+  createInvite(args: {
+    label?: string | null;
+    createdByLogin?: string | null;
+    expiresAt?: number | null;
+  }): StaffInvite {
+    // 24-character urlsafe code. Long enough that brute-forcing is
+    // hopeless even without rate limiting; short enough to read
+    // aloud once if needed.
+    const code = crypto.randomBytes(18).toString("base64url");
+    const now = Date.now();
+    this.db.prepare(
+      `INSERT INTO staff_invites
+         (code, label, created_at, created_by_login, expires_at, status)
+       VALUES (?, ?, ?, ?, ?, 'pending')`
+    ).run(code, args.label || null, now, args.createdByLogin || null,
+          args.expiresAt ?? null);
+    return {
+      code,
+      label:            args.label || null,
+      createdAt:        now,
+      createdByLogin:   args.createdByLogin || null,
+      expiresAt:        args.expiresAt ?? null,
+      status:           "pending",
+      consumedAt:       null,
+      consumedById:     null,
+      consumedByLogin:  null,
+    };
+  }
+
+  /** Atomically claim an invite code + add the user as a moderator. */
+  consumeInvite(code: string, user: {
+    id: string;
+    login: string;
+    displayName: string;
+  }): { ok: true; moderator: ModeratorRecord } | { ok: false; reason: string } {
+    return this.db.transaction(() => {
+      const row = this.db.prepare(
+        "SELECT * FROM staff_invites WHERE code = ?"
+      ).get(code) as any;
+      if (!row) return { ok: false as const, reason: "not_found" };
+      if (row.status !== "pending") {
+        return { ok: false as const, reason: `already ${row.status}` };
+      }
+      if (row.expires_at && row.expires_at < Date.now()) {
+        // Mark as expired-effectively so listing shows it as such;
+        // technically we could leave it 'pending' with the timestamp
+        // and let the UI render the state, but flipping to 'revoked'
+        // is simpler.
+        this.db.prepare("UPDATE staff_invites SET status = 'revoked' WHERE code = ?").run(code);
+        return { ok: false as const, reason: "expired" };
+      }
+      // Don't add the owner as a moderator — pointless.
+      if (this.isOwner(user)) {
+        return { ok: false as const, reason: "you are the owner" };
+      }
+      const mod = this.addModerator({
+        twitchUserId: user.id,
+        twitchLogin:  user.login,
+        displayName:  user.displayName,
+        addedByLogin: row.created_by_login,
+      });
+      this.db.prepare(
+        `UPDATE staff_invites
+            SET status = 'consumed',
+                consumed_at = ?,
+                consumed_by_id = ?,
+                consumed_by_login = ?
+          WHERE code = ?`
+      ).run(Date.now(), user.id, String(user.login).toLowerCase(), code);
+      return { ok: true as const, moderator: mod };
+    })();
+  }
+
+  revokeInvite(code: string): boolean {
+    return this.db.prepare(
+      "UPDATE staff_invites SET status = 'revoked' WHERE code = ? AND status = 'pending'"
+    ).run(code).changes > 0;
   }
 
   // ---- Sessions -------------------------------------------------
@@ -824,6 +1012,27 @@ function mapCustomScene(r: any): CustomScene {
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
+}
+
+function mapInvite(r: any): StaffInvite {
+  return {
+    code:            r.code,
+    label:           r.label ?? null,
+    createdAt:       r.created_at,
+    createdByLogin:  r.created_by_login ?? null,
+    expiresAt:       r.expires_at ?? null,
+    status:          r.status,
+    consumedAt:      r.consumed_at ?? null,
+    consumedById:    r.consumed_by_id ?? null,
+    consumedByLogin: r.consumed_by_login ?? null,
+  };
+}
+
+/** JSON.parse with a typed fallback. Used for nullable JSON columns. */
+function safeJson<T>(s: string | null | undefined, fallback: T): T {
+  if (!s) return fallback;
+  try { return JSON.parse(s) as T; }
+  catch { return fallback; }
 }
 
 let _store: Store | null = null;

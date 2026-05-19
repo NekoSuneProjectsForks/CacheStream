@@ -20,6 +20,7 @@ import { VodsTab } from "./tabs/VodsTab";
 import { GamesTab } from "./tabs/GamesTab";
 import { BrandingTab } from "./tabs/BrandingTab";
 import { SourcesTab } from "./tabs/SourcesTab";
+import { StaffTab } from "./tabs/StaffTab";
 
 interface SessionInfo { login: string; displayName: string }
 interface BrandingSnapshot {
@@ -33,6 +34,7 @@ interface BrandingSnapshot {
 interface Props {
   session: SessionInfo;
   owner: OwnerRecord | null;
+  role: "owner" | "mod";
   branding: BrandingSnapshot;
   initialStatus: StreamerStatus | null;
   initialScenes: ScenePreset[];
@@ -44,9 +46,16 @@ interface Props {
 
 type TabKey =
   | "status" | "studio" | "scenes" | "sources" | "info" | "chat"
-  | "commands" | "alerts" | "music" | "vods" | "games" | "branding";
+  | "commands" | "alerts" | "music" | "vods" | "games"
+  | "branding" | "staff";
 
-const TABS: Array<{ key: TabKey; label: string }> = [
+/**
+ * `ownerOnly` tabs are hidden from moderators. Mods still get
+ * everything they need to drive the panel (scenes, chat, music,
+ * commands, etc.); branding + staff invites are owner-only by
+ * design (see lib/auth.ts).
+ */
+const TABS: Array<{ key: TabKey; label: string; ownerOnly?: boolean }> = [
   { key: "status",   label: "Status" },
   { key: "studio",   label: "Studio" },
   { key: "scenes",   label: "Scenes" },
@@ -58,7 +67,8 @@ const TABS: Array<{ key: TabKey; label: string }> = [
   { key: "music",    label: "Music" },
   { key: "vods",     label: "VODs" },
   { key: "games",    label: "Games" },
-  { key: "branding", label: "Branding" },
+  { key: "branding", label: "Branding", ownerOnly: true },
+  { key: "staff",    label: "Staff",    ownerOnly: true },
 ];
 
 /**
@@ -78,6 +88,8 @@ const TABS: Array<{ key: TabKey; label: string }> = [
  */
 export function AdminPanel(props: Props) {
   const [tab, setTab] = useState<TabKey>("status");
+  const [navOpen, setNavOpen] = useState(false);
+  const visibleTabs = TABS.filter((t) => !t.ownerOnly || props.role === "owner");
 
   return (
     <div className="admin-shell">
@@ -96,21 +108,36 @@ export function AdminPanel(props: Props) {
           <div className="user">
             <span className="user-label">signed in as</span>
             <strong>{props.session.displayName}</strong>
+            <span className={`role-badge role-${props.role}`}>
+              {props.role === "owner" ? "OWNER" : "MOD"}
+            </span>
+            {props.role === "mod" && props.owner && (
+              <span className="user-label" style={{ marginLeft: 8 }}>
+                for <strong>{props.owner.displayName}</strong>
+              </span>
+            )}
           </div>
           <form action="/api/auth/logout" method="post">
             <button className="btn-ghost" type="submit">Logout</button>
           </form>
         </div>
+        {/* Mobile menu toggle — hidden on desktop via CSS. */}
+        <button className="nav-toggle"
+                aria-label={navOpen ? "Close navigation" : "Open navigation"}
+                aria-expanded={navOpen}
+                onClick={() => setNavOpen((v) => !v)}>
+          {navOpen ? "✕" : "☰"}
+        </button>
       </header>
 
-      <nav className="tab-nav" role="tablist" aria-label="Sections">
-        {TABS.map((t) => (
+      <nav className={`tab-nav ${navOpen ? "open" : ""}`} role="tablist" aria-label="Sections">
+        {visibleTabs.map((t) => (
           <button
             key={t.key}
             role="tab"
             aria-selected={tab === t.key}
             className={`tab ${tab === t.key ? "active" : ""}`}
-            onClick={() => setTab(t.key)}
+            onClick={() => { setTab(t.key); setNavOpen(false); }}
           >
             {t.label}
           </button>
@@ -138,7 +165,8 @@ export function AdminPanel(props: Props) {
         {tab === "music"    && <MusicTab />}
         {tab === "vods"     && <VodsTab />}
         {tab === "games"    && <GamesTab />}
-        {tab === "branding" && <BrandingTab initial={props.branding} />}
+        {tab === "branding" && props.role === "owner" && <BrandingTab initial={props.branding} />}
+        {tab === "staff"    && props.role === "owner" && <StaffTab />}
       </div>
 
       <footer className="admin-foot">

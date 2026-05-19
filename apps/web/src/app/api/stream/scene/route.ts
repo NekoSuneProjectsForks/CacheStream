@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
-import { ownerRoute, readJson } from "@/lib/api-helpers";
+import { staffRoute, readJson } from "@/lib/api-helpers";
 import { streamer } from "@/lib/streamer-client";
 
 export const dynamic = "force-dynamic";
 
 /** POST /api/stream/scene  { url: string } */
-export const POST = ownerRoute(async (req) => {
+export const POST = staffRoute(async (req) => {
   const body = await readJson<{ url?: string }>(req);
   const url = (body.url || "").trim();
   if (!/^https?:\/\//.test(url)) {

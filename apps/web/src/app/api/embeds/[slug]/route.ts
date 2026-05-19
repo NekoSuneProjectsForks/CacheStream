@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { ownerRoute, readJson } from "@/lib/api-helpers";
+import { staffRoute, readJson } from "@/lib/api-helpers";
 import { kvGet, kvSet } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
  *   PATCH  /api/embeds/<slug>  → owner-only
  *   DELETE /api/embeds/<slug>  → owner-only
  *
- * GET is intentionally public-ish (no ownerRoute) because the
+ * GET is intentionally public-ish (no staffRoute) because the
  * scene page at /scene/embed/<slug> runs inside the streamer's
  * headless Chromium and has no OAuth cookie. The slug-keyed URL
  * is treated as a capability — anyone who knows the slug can
@@ -45,7 +45,7 @@ export async function GET(_: Request, { params }: { params: { slug: string } }) 
   return NextResponse.json(entry);
 }
 
-export const PATCH = ownerRoute(async (req, { params }: { params: { slug: string } }) => {
+export const PATCH = staffRoute(async (req, { params }: { params: { slug: string } }) => {
   const patch = await readJson<Partial<Embed>>(req);
   const list = readAll();
   const i = list.findIndex((e) => e.slug === params.slug);
@@ -69,7 +69,7 @@ export const PATCH = ownerRoute(async (req, { params }: { params: { slug: string
   return NextResponse.json(next);
 });
 
-export const DELETE = ownerRoute(async (_req, { params }: { params: { slug: string } }) => {
+export const DELETE = staffRoute(async (_req, { params }: { params: { slug: string } }) => {
   const list = readAll();
   const next = list.filter((e) => e.slug !== params.slug);
   if (next.length === list.length) {

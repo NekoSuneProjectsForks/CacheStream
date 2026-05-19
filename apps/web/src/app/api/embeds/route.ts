@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import crypto from "node:crypto";
-import { ownerRoute, readJson } from "@/lib/api-helpers";
+import { staffRoute, readJson } from "@/lib/api-helpers";
 import { kvGet, kvSet, kvDelete } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
@@ -59,7 +59,7 @@ function slugify(name: string): string {
 }
 
 /** GET /api/embeds — list all configured browser-source embeds. */
-export const GET = ownerRoute(async () => {
+export const GET = staffRoute(async () => {
   return NextResponse.json(readAll());
 });
 
@@ -74,7 +74,7 @@ export const GET = ownerRoute(async () => {
  * they trust, because the iframe can still consume CPU + render
  * arbitrary visuals over the broadcast.
  */
-export const POST = ownerRoute(async (req) => {
+export const POST = staffRoute(async (req) => {
   const body = await readJson<Partial<Embed>>(req);
   if (!body.name || !body.url) {
     return NextResponse.json({ error: "name and url required" }, { status: 400 });

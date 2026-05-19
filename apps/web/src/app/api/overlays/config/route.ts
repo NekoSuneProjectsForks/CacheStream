@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { ownerRoute, readJson } from "@/lib/api-helpers";
+import { staffRoute, readJson } from "@/lib/api-helpers";
 import { kvSet } from "@/lib/db";
 import { getOverlayConfig, OverlayConfig } from "@/lib/overlays";
 
@@ -19,7 +19,7 @@ export async function GET() {
   return NextResponse.json(getOverlayConfig());
 }
 
-export const POST = ownerRoute(async (req) => {
+export const POST = staffRoute(async (req) => {
   const patch = await readJson<Partial<OverlayConfig>>(req);
   const current = getOverlayConfig();
   const next: OverlayConfig = JSON.parse(JSON.stringify(current));

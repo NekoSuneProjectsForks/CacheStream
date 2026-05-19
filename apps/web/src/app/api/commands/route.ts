@@ -1,14 +1,14 @@
 import { NextResponse } from "next/server";
-import { ownerRoute, readJson } from "@/lib/api-helpers";
+import { staffRoute, readJson } from "@/lib/api-helpers";
 import { getStore, type CustomCommand } from "@/lib/store";
 
 export const dynamic = "force-dynamic";
 
-export const GET = ownerRoute(async () => {
+export const GET = staffRoute(async () => {
   return NextResponse.json({ commands: getStore().listCommands() });
 });
 
-export const POST = ownerRoute(async (req) => {
+export const POST = staffRoute(async (req) => {
   const body = await readJson<Partial<CustomCommand>>(req);
   if (!body.trigger || !body.response) {
     return NextResponse.json({ error: "trigger and response required" }, { status: 400 });

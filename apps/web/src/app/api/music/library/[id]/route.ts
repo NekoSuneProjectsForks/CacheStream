@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { ownerRoute, readJson } from "@/lib/api-helpers";
+import { staffRoute, readJson } from "@/lib/api-helpers";
 import { config } from "@/lib/config";
 import { getStore } from "@/lib/store";
 
@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 interface Ctx { params: { id: string } }
 
 /** PATCH /api/music/library/:id — edit metadata (title/artist/album). */
-export const PATCH = ownerRoute(async (req, ctx: Ctx) => {
+export const PATCH = staffRoute(async (req, ctx: Ctx) => {
   const body = await readJson<{
     title?: string | null;
     artist?: string | null;
@@ -23,7 +23,7 @@ export const PATCH = ownerRoute(async (req, ctx: Ctx) => {
 });
 
 /** DELETE /api/music/library/:id — remove from DB AND delete the file. */
-export const DELETE = ownerRoute(async (_req, ctx: Ctx) => {
+export const DELETE = staffRoute(async (_req, ctx: Ctx) => {
   const store = getStore();
   const t = store.getMusicTrack(ctx.params.id);
   if (!t) return NextResponse.json({ error: "not_found" }, { status: 404 });

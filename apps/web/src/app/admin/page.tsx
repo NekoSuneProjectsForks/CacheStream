@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { getCurrentSession } from "@/lib/auth";
+import { getCurrentSession, getCurrentRole } from "@/lib/auth";
 import { getStore } from "@/lib/store";
 import { tryStatus } from "@/lib/streamer-client";
 import { config } from "@/lib/config";
@@ -41,7 +41,12 @@ export default async function AdminPage() {
     return <LoginGate owner={owner} loginUrl={`${config.web.publicUrl}/api/auth/twitch/login`} />;
   }
 
-  if (!store.isOwner({ id: session.twitchUserId, login: session.login })) {
+  // v1.13.0: owner OR moderator both get the panel. Anyone else
+  // is kicked back to login (the OAuth callback already 403s a
+  // non-staff sign-in, but a stale session shouldn't be able to
+  // hang around either).
+  const role = getCurrentRole();
+  if (role === null) {
     redirect("/api/auth/logout");
   }
 
@@ -59,6 +64,7 @@ export default async function AdminPage() {
     <AdminPanel
       session={{ login: session.login, displayName: session.displayName }}
       owner={owner}
+      role={role as "owner" | "mod"}
       branding={getBranding()}
       initialStatus={status}
       initialScenes={scenes}

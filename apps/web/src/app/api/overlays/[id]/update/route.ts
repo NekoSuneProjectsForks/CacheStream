@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { ownerRoute, readJson } from "@/lib/api-helpers";
+import { staffRoute, readJson } from "@/lib/api-helpers";
 import { getStore, type Overlay } from "@/lib/store";
 import { streamer } from "@/lib/streamer-client";
 
@@ -15,7 +15,7 @@ interface Ctx { params: { id: string } }
  * If the set is currently active on the streamer, the live render
  * is updated in the same call.
  */
-export const PATCH = ownerRoute(async (req, ctx: Ctx) => {
+export const PATCH = staffRoute(async (req, ctx: Ctx) => {
   const { overlays } = await readJson<{ overlays?: Overlay[] }>(req);
   if (!Array.isArray(overlays)) {
     return NextResponse.json({ error: "overlays must be an array" }, { status: 400 });

@@ -1,5 +1,80 @@
 # Changelog
 
+## 1.13.0
+
+Multi-broadcaster + mobile control panel. Final feature in the
+original v1.x roadmap.
+
+### Multi-broadcaster (moderator invites)
+
+The owner can now invite trusted users (mods) to drive the
+panel without giving up the broadcaster's Twitch account.
+
+- **New Staff tab** (owner-only) — mint single-use invite codes
+  with optional expiry (1h / 24h / 7d / 30d / never), copy the
+  URL, share it with the mod. Active moderators list + revoke
+  any time.
+- **`/login/invite?code=<code>`** lands the mod, sets a signed
+  cookie, bounces them through Twitch OAuth. The callback
+  atomically consumes the code + adds them to `moderators`.
+- **Role badge in the panel header** — `OWNER` (cyan) or `MOD`
+  (amber). Mods also see "for <broadcaster>" so they remember
+  which channel they're driving.
+- **Owner-only tabs hidden from mods** — Branding + Staff. All
+  other tabs (Status, Studio, Scenes, Sources, Stream Info,
+  Chat, Commands, Alerts, Music, VODs, Games) work for both.
+
+### New permission tier
+
+  `requireOwner()`  — broadcaster only (identity/billing/staff)
+  `requireStaff()`  — owner OR mod (everyday panel driving)
+
+`api-helpers.ts` now exports `staffRoute()` alongside
+`ownerRoute()`. 51 of the 67 existing API routes migrated to
+`staffRoute`; 14 stayed owner-only (branding, stream-key
+rotation, invite management, host updater, upload quotas).
+
+The broadcaster's tokens still drive Helix calls regardless of
+which mod triggered the action — mods authenticate as themselves
+but the channel identity remains the owner. Mods' own tokens are
+discarded after session creation; they're not used for anything
+downstream.
+
+### New schema
+
+  moderators       — twitch_user_id, login, display_name,
+                     added_at, added_by_login, scopes_json
+  staff_invites    — code, label, created_*, expires_at,
+                     status (pending/consumed/revoked),
+                     consumed_*
+
+Migration `v5` is idempotent and additive — no data changes for
+existing single-owner deployments.
+
+### Mobile control panel
+
+The admin shell now adapts to phone-sized screens:
+
+- **Drawer nav** under 700px — horizontal tab bar collapses to a
+  hamburger menu, opens into a vertical list. Tap a tab → drawer
+  closes + tab activates.
+- **Stacked layouts** — header wraps gracefully; multi-column
+  cards collapse to single column; metric grids go 1→2 columns
+  under 700px.
+- **Larger tap targets** — buttons + inputs get 38px minimum
+  height; inputs get 16px font size to prevent iOS zoom-on-focus.
+- **Tighter breakpoints**: 900px (tablet), 700px (phone),
+  400px (small phone — drops the role-badge text spacing,
+  shrinks brand text).
+
+The desktop layout is unchanged.
+
+### Migration
+
+`docker compose up -d --build` (or hit Update on the panel).
+Existing single-owner deployments work exactly as before; the
+new tables stay empty until the owner mints their first invite.
+
 ## 1.12.0
 
 Custom-command live-stat variables.

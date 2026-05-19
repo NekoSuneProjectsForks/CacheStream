@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { NextResponse } from "next/server";
-import { ownerRoute } from "@/lib/api-helpers";
+import { staffRoute } from "@/lib/api-helpers";
 import { config } from "@/lib/config";
 import { getStore } from "@/lib/store";
 
@@ -16,7 +16,7 @@ const ALLOWED_EXT = new Set([".mp4", ".mov", ".mkv", ".webm", ".m4v"]);
  * represented as a vod_sources row. Useful when files were
  * SFTP'd in directly rather than uploaded through the panel.
  */
-export const POST = ownerRoute(async () => {
+export const POST = staffRoute(async () => {
   const dir = config.vods.libraryDir;
   try { await fs.access(dir); } catch { return NextResponse.json({ added: 0, vods: [] }); }
 

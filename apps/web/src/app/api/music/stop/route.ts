@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
-import { ownerRoute } from "@/lib/api-helpers";
+import { staffRoute } from "@/lib/api-helpers";
 import { musicEngine } from "@/lib/music";
 
 export const dynamic = "force-dynamic";
 
-export const POST = ownerRoute(async () => {
+export const POST = staffRoute(async () => {
   musicEngine().stop();
   return NextResponse.json({ status: musicEngine().status() });
 });
