@@ -1,5 +1,47 @@
 # Changelog
 
+## 1.12.0
+
+Custom-command live-stat variables.
+
+Custom commands now have five new response template tokens that
+resolve against the current broadcast state:
+
+  {uptime}     — stream uptime ("1h 23m" or "offline")
+  {viewers}    — current viewer count
+  {game}       — current category
+  {title}      — broadcast title
+  {followers}  — total follower count
+
+Example commands you can build now:
+
+  !uptime  → "We've been live for {uptime}!"
+  !game    → "{user} we're playing {game} right now"
+  !stats   → "{viewers} watching · {followers} followers · {game}"
+
+### How it works
+
+The substitution is async and only fires when a command's
+response template actually references one of the new tokens.
+Commands that only use the old `{user}` / `{args}` / `{channel}`
+tokens are unchanged and incur zero Helix calls.
+
+When dynamic tokens ARE in use, a 5-second snapshot cache
+coalesces concurrent invocations — a busy chat hitting `!uptime`
+once per chatter still only fires one Helix call every 5 s. The
+existing per-command cooldown also stacks on top, so the
+practical ceiling is comfortably under the Helix rate limit.
+
+If Twitch / the network is unhappy, dynamic tokens degrade to
+sane defaults (`offline`, `0`, `—`) so chat never sees a literal
+`{viewers}` leak through.
+
+### UI
+
+The Commands tab gained an "Available response variables"
+collapsible reference with all the supported tokens documented
+inline.
+
 ## 1.11.0
 
 New "Sources" tab — three new ways to bring external content

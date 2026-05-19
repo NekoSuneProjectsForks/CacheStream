@@ -110,8 +110,26 @@ export function CommandsTab() {
         <div className="card-head"><h2>Custom chat commands</h2></div>
         <p className="hint">
           Triggers match the first word of a chat message (with or without leading <code>!</code>).
-          Response supports <code>{"{user}"}</code>, <code>{"{channel}"}</code>, <code>{"{arg1}"}</code>…<code>{"{args}"}</code>.
         </p>
+        <details className="hint" style={{ marginTop: 4 }}>
+          <summary style={{ cursor: "pointer" }}>Available response variables</summary>
+          <ul style={{ margin: "8px 0 0", padding: "0 0 0 18px", lineHeight: 1.6 }}>
+            <li><code>{"{user}"}</code> — chatter's display name</li>
+            <li><code>{"{channel}"}</code> — broadcaster login</li>
+            <li><code>{"{arg1}"}</code>…<code>{"{argN}"}</code> — individual words after the trigger</li>
+            <li><code>{"{args}"}</code> — everything after the trigger, joined</li>
+            <li><code>{"{uptime}"}</code> — stream uptime, e.g. <em>1h 23m</em> (or <em>offline</em>)</li>
+            <li><code>{"{viewers}"}</code> — current viewer count</li>
+            <li><code>{"{game}"}</code> — current category</li>
+            <li><code>{"{title}"}</code> — broadcast title</li>
+            <li><code>{"{followers}"}</code> — total follower count</li>
+          </ul>
+          <div className="muted" style={{ marginTop: 6, fontSize: 11 }}>
+            Live-stat variables ({"{uptime}"}, {"{viewers}"}, {"{game}"},
+            {" "}{"{title}"}, {"{followers}"}) hit Helix with a 5-second snapshot
+            cache. Commands that don't reference them are zero-cost.
+          </div>
+        </details>
 
         <ul className="list">
           {commands.length === 0 && <li className="muted">No commands yet — add one below.</li>}
