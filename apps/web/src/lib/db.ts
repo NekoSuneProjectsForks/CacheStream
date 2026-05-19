@@ -39,6 +39,10 @@ export function getDb(): Database.Database {
   _db.pragma("journal_mode = WAL");      // crash-safe, allows readers during writes
   _db.pragma("foreign_keys = ON");
   _db.pragma("busy_timeout = 5000");
+  _db.pragma("synchronous = NORMAL");   // safe in WAL mode; skips per-commit fsync
+  _db.pragma("mmap_size = 268435456");  // 256 MB memory-mapped reads
+  _db.pragma("temp_store = MEMORY");    // sort buffers + temp tables stay in RAM
+  _db.pragma("cache_size = -20000");    // 20 MB page cache (negative = kibibytes)
 
   applySchema(_db);
   migrateFromJson(_db, dir);
@@ -414,18 +418,21 @@ function migrateFromJson(db: Database.Database, dir: string): void {
 
 // ---- KV helpers (used by anything that just needs a flag) -------
 
+let _kvGetStmt:    Database.Statement | null = null;
+let _kvSetStmt:    Database.Statement | null = null;
+let _kvDeleteStmt: Database.Statement | null = null;
+
 export function kvGet(key: string): string | null {
-  const row = getDb().prepare("SELECT value FROM kv WHERE key = ?").get(key) as
-    | { value: string } | undefined;
-  return row?.value ?? null;
+  _kvGetStmt ??= getDb().prepare("SELECT value FROM kv WHERE key = ?");
+  return (_kvGetStmt.get(key) as { value: string } | undefined)?.value ?? null;
 }
 
 export function kvSet(key: string, value: string): void {
-  getDb()
-    .prepare("INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)")
-    .run(key, value);
+  _kvSetStmt ??= getDb().prepare("INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)");
+  _kvSetStmt.run(key, value);
 }
 
 export function kvDelete(key: string): void {
-  getDb().prepare("DELETE FROM kv WHERE key = ?").run(key);
+  _kvDeleteStmt ??= getDb().prepare("DELETE FROM kv WHERE key = ?");
+  _kvDeleteStmt.run(key);
 }

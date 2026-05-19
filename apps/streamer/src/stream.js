@@ -202,6 +202,7 @@ class Streamer extends EventEmitter {
 
     this.restartTimer = null;
     this.shouldRun = false; // user intent — survives reconnects
+    this.reconnectBackoffMs = 1000;
 
     // VOD mode: when active, the screencast pipeline is torn
     // down and a direct file-to-RTMP FFmpeg takes over.
@@ -251,6 +252,7 @@ class Streamer extends EventEmitter {
 
     try {
       await this._runOnce();
+      this.reconnectBackoffMs = 1000;
       this.startedAt = Date.now();
       this._setState("running");
     } catch (err) {
@@ -284,7 +286,7 @@ class Streamer extends EventEmitter {
     this.sceneUrl = url;
     if (this.page && this.state === "running") {
       this.logger.info({ url }, "switching scene");
-      await this.page.goto(url, { waitUntil: "networkidle2", timeout: 30_000 });
+      await this.page.goto(url, { waitUntil: "domcontentloaded", timeout: 30_000 });
       await this._reapplyOverlays();
     }
   }
@@ -577,19 +579,19 @@ class Streamer extends EventEmitter {
       "-nostats",
 
       // Input 0: MJPEG frames over stdin
-      "-thread_queue_size", "1024",
+      "-thread_queue_size", "32",
       "-use_wallclock_as_timestamps", "1",
       "-f", "image2pipe",
       "-vcodec", "mjpeg",
       "-i", "-",
 
       // Input 1: silence carrier FIFO (always written by web)
-      "-thread_queue_size", "1024",
+      "-thread_queue_size", "32",
       "-f", "s16le", "-ar", "44100", "-ac", "2",
       "-i", silenceFifo,
 
       // Input 2: music FIFO (written only while a track plays)
-      "-thread_queue_size", "1024",
+      "-thread_queue_size", "32",
       "-f", "s16le", "-ar", "44100", "-ac", "2",
       "-i", musicFifo,
 
@@ -904,7 +906,8 @@ class Streamer extends EventEmitter {
 
   _scheduleReconnect() {
     if (!this.shouldRun || this.restartTimer) return;
-    const delay = this.config.runtime.reconnectDelayMs;
+    const delay = this.reconnectBackoffMs;
+    this.reconnectBackoffMs = Math.min(this.reconnectBackoffMs * 2, this.config.runtime.reconnectDelayMs);
     this.logger.warn({ delayMs: delay }, "scheduling reconnect");
     this._setState("reconnecting");
 
@@ -914,6 +917,7 @@ class Streamer extends EventEmitter {
       if (!this.shouldRun) return;
       try {
         await this._runOnce();
+        this.reconnectBackoffMs = 1000;
         this.startedAt = Date.now();
         this._setState("running");
       } catch (err) {
@@ -950,8 +954,10 @@ class Streamer extends EventEmitter {
     const args = [
       "-hide_banner", "-loglevel", "warning", "-nostats",
       ...inputArgs,
-      // Video: normalise to the configured output spec
-      "-vf", `fps=${video.fps},scale=${video.width}:${video.height}:flags=bilinear,format=yuv420p`,
+      // Video: normalise to the configured output spec. Skip the
+      // scale step when the source is already the right size to
+      // avoid a no-op sws_scale pass on every frame.
+      "-vf", `fps=${video.fps},format=yuv420p`,
       // Codec-specific flags (libx264 / h264_nvenc / h264_v4l2m2m / …)
       ...buildVideoCodecArgs(video),
       // Audio: re-encode to AAC at the configured bitrate. If the

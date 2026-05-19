@@ -51,7 +51,7 @@ class EventSubClient {
   private sessionId: string | null = null;
   private lastError: string | null = null;
   private wantOnline = false;
-  private backoff = 1000;
+  private backoff = 250;
   private reconnectTimer: NodeJS.Timeout | null = null;
 
   status() {
@@ -194,31 +194,33 @@ class EventSubClient {
     }
     const broadcasterId = tokens.twitchUserId;
 
-    for (const sub of SUBSCRIPTIONS) {
-      try {
-        const body = {
-          type: sub.type,
-          version: sub.version,
-          condition: sub.conditionFor(broadcasterId),
-          transport: { method: "websocket", session_id: this.sessionId },
-        };
-        const res = await fetch(SUB_URL, {
-          method: "POST",
-          headers: {
-            "Client-Id": config.oauth.clientId,
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(body),
-        });
-        if (!res.ok && res.status !== 409 /* already subscribed */) {
-          const text = await res.text().catch(() => "");
-          console.warn(`[eventsub] subscribe ${sub.type} failed:`, res.status, text);
+    await Promise.allSettled(
+      SUBSCRIPTIONS.map(async (sub) => {
+        try {
+          const body = {
+            type: sub.type,
+            version: sub.version,
+            condition: sub.conditionFor(broadcasterId),
+            transport: { method: "websocket", session_id: this.sessionId },
+          };
+          const res = await fetch(SUB_URL, {
+            method: "POST",
+            headers: {
+              "Client-Id": config.oauth.clientId,
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(body),
+          });
+          if (!res.ok && res.status !== 409 /* already subscribed */) {
+            const text = await res.text().catch(() => "");
+            console.warn(`[eventsub] subscribe ${sub.type} failed:`, res.status, text);
+          }
+        } catch (err) {
+          console.warn(`[eventsub] subscribe ${sub.type} threw:`, err);
         }
-      } catch (err) {
-        console.warn(`[eventsub] subscribe ${sub.type} threw:`, err);
-      }
-    }
+      })
+    );
   }
 
   private _scheduleReconnect(): void {

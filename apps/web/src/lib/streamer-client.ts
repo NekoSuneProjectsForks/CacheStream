@@ -58,7 +58,8 @@ export interface StreamerStatus {
 async function call<T>(
   method: "GET" | "POST",
   path: string,
-  body?: unknown
+  body?: unknown,
+  timeoutMs = 5_000
 ): Promise<T> {
   const url = `${config.streamer.url}${path}`;
   const res = await fetch(url, {
@@ -68,8 +69,7 @@ async function call<T>(
       ...(body ? { "Content-Type": "application/json" } : {}),
     },
     body: body ? JSON.stringify(body) : undefined,
-    // Streamer can take a few seconds to launch Chromium.
-    signal: AbortSignal.timeout(20_000),
+    signal: AbortSignal.timeout(timeoutMs),
     cache: "no-store",
   });
 
@@ -90,10 +90,10 @@ async function call<T>(
 }
 
 export const streamer = {
-  status:   () => call<StreamerStatus>("GET", "/status"),
-  start:    () => call<StreamerStatus>("POST", "/start"),
+  status:   () => call<StreamerStatus>("GET",  "/status"),
+  start:    () => call<StreamerStatus>("POST", "/start",   undefined, 20_000),
   stop:     () => call<StreamerStatus>("POST", "/stop"),
-  restart:  () => call<StreamerStatus>("POST", "/restart"),
+  restart:  () => call<StreamerStatus>("POST", "/restart", undefined, 20_000),
   setScene: (url: string) =>
     call<StreamerStatus>("POST", "/scene", { url }),
   setOverlays: (overlays: unknown[]) =>
