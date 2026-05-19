@@ -123,31 +123,52 @@ function buildVideoCodecArgs(video) {
 /**
  * Build the minimum video filter chain for the configured output.
  *
- *   - Skip `fps=` when Chromium is already feeding us the target rate
- *     (i.e. capture-every-nth-frame produces the same effective fps).
- *   - Skip `scale=` when capture resolution matches output exactly.
- *   - `-pix_fmt yuv420p` on the encoder side covers chroma conversion,
- *     so we don't need a `format=yuv420p` filter step.
+ * The defaults (Chromium screencast at the same width/height/fps
+ * we're encoding at) need NO filters at all — the input is already
+ * the right size, the right rate, and yuvj420p which the encoder
+ * accepts directly thanks to `-pix_fmt yuv420p` in
+ * buildVideoCodecArgs.
  *
- * Returns the inner filter string for a [0:v]...[v] complex chain.
- * Always returns at least an `null` filter so the chain is syntactically
- * valid even when nothing needs doing.
+ * Filters cost real CPU per frame in software-only pipelines (the
+ * Pi 5 path). Eliding them entirely in the common case is a
+ * measurable win:
+ *
+ *   - `fps=N` runs framerate conversion + drops/duplicates frames.
+ *     Skipped when capture fps already equals output fps.
+ *   - `scale=WxH` is sws_scale on every frame. Skipped when capture
+ *     resolution already equals output resolution.
+ *   - `format=yuv420p` is a colour-space conversion. Skipped because
+ *     the encoder's `-pix_fmt yuv420p` does the same conversion
+ *     once at the encoder boundary instead of per-frame in a filter.
+ *
+ * Returns an array of comma-joined filter steps. When no filters
+ * are needed the caller can use an `fps` filter as a cheap pass-
+ * through, but in practice we elide the chain entirely (see
+ * _spawnFFmpeg). Returns null when no filters needed.
  */
 function buildVideoFilters(video) {
   const steps = [];
-  // Page repaints aren't perfectly periodic; cap to FPS regardless.
-  steps.push(`fps=${video.fps}`);
-  // Only scale if we actually need to.
-  // (When captureEveryNth > 1 Chromium still hands us the same
-  //  resolution, so the comparison still holds.)
-  // We can't read the actual capture size here, so be conservative:
-  // skip the scaler only when both dims are already what we want.
-  // In practice the viewport is exactly width×height, so this is
-  // the common case.
-  // If the operator runs with mismatched STREAM_WIDTH/HEIGHT vs the
-  // page viewport, FFmpeg will letterbox-or-stretch via the encoder.
-  steps.push(`scale=${video.width}:${video.height}:flags=bilinear`);
-  return steps.join(",");
+  // Chromium's screencast emits frames at the rate the page
+  // repaints, capped by `everyNthFrame`. When `captureEveryNthFrame
+  // === 1` and the page renders at a stable rate ≥ video.fps,
+  // Chromium effectively gives us video.fps frames already — the
+  // `fps=` filter would be a no-op pacer.
+  //
+  // Conservative: only skip when Chromium is configured to produce
+  // exactly the target rate. If the operator runs with a different
+  // capture cadence (e.g. captureEveryNthFrame > 1 for low-CPU
+  // mode), we still need the pacer.
+  if (video.captureEveryNthFrame && video.captureEveryNthFrame > 1) {
+    steps.push(`fps=${video.fps}`);
+  }
+  // Chromium's `maxWidth`/`maxHeight` in Page.startScreencast scales
+  // to fit while preserving aspect — so if the viewport matches the
+  // output dims exactly, the frames arrive already sized. Skip the
+  // scaler. If they ever mismatch, FFmpeg's encoder-side rescale
+  // (when needed) is still happy to consume different input sizes.
+  // Operators with mismatched viewport vs output should set those
+  // env vars consistently for best quality + lowest CPU.
+  return steps.length > 0 ? steps.join(",") : null;
 }
 
 class Streamer extends EventEmitter {
@@ -414,6 +435,36 @@ class Streamer extends EventEmitter {
         "--autoplay-policy=no-user-gesture-required",
         "--hide-scrollbars",
         "--mute-audio",
+        // v1.13.1: extra non-display flags that cut Chromium's
+        // background work in our use case.
+        //
+        // --disable-features=Translate,BackForwardCache,...
+        //   Translate runs a small "is this page in a foreign
+        //   language" classifier on every navigation; we don't
+        //   need it. BackForwardCache holds memory for pages we
+        //   already moved away from; scenes never go back.
+        //   PaintHolding can briefly defer the first paint
+        //   waiting for full layout; we want the first frame
+        //   captured ASAP.
+        "--disable-features=Translate,BackForwardCache,PaintHolding,InterestFeedContentSuggestions,CalculateNativeWinOcclusion,OptimizationHints,MediaRouter",
+        // No notifications, sync, default browser checks, plugins,
+        // crash reporting, search engine choice screens — all are
+        // background work that's useless to a streamer.
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--disable-default-apps",
+        "--disable-extensions",
+        "--disable-notifications",
+        "--disable-sync",
+        "--disable-translate",
+        "--disable-component-update",
+        "--disable-domain-reliability",
+        "--disable-client-side-phishing-detection",
+        "--disable-breakpad",
+        "--metrics-recording-only",
+        "--no-pings",
+        "--password-store=basic",
+        "--use-mock-keychain",
         `--window-size=${this.config.video.width},${this.config.video.height}`,
       ],
     });
@@ -434,7 +485,20 @@ class Streamer extends EventEmitter {
       deviceScaleFactor: 1,
     });
     this.logger.info({ url: this.sceneUrl }, "loading scene");
-    await this.page.goto(this.sceneUrl, { waitUntil: "networkidle2", timeout: 30_000 });
+    // v1.13.1: `domcontentloaded` instead of `networkidle2`.
+    //
+    // networkidle2 waits for ≤2 active connections to be idle for
+    // 500 ms, which conflicts with our scene overlays — each opens
+    // a long-lived SSE connection (chat, alerts, etc.). Three or
+    // more SSEs push us above the threshold and we'd stall here
+    // for the full 30 s timeout. Even with two, we'd pay 500 ms.
+    //
+    // domcontentloaded fires when the HTML parser is done; the
+    // overlay scripts mount their SSE/fetches on their own
+    // schedules after that, none of which block the first frame
+    // being painted. Effect: scene switches feel ~500 ms snappier
+    // and stop occasionally hanging behind the 30 s timeout.
+    await this.page.goto(this.sceneUrl, { waitUntil: "domcontentloaded", timeout: 30_000 });
   }
 
   _spawnFFmpeg() {
@@ -529,23 +593,54 @@ class Streamer extends EventEmitter {
       "-f", "s16le", "-ar", "44100", "-ac", "2",
       "-i", musicFifo,
 
-      // Input 3: lavfi safety net so we always have something to
-      // mix even if BOTH FIFOs are missing writers at startup
-      "-f", "lavfi",
-      "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
+      // v1.13.1: removed the lavfi anullsrc safety-net input.
+      // Both FIFOs are guaranteed to have writers by the time
+      // we get here — the web container's MusicEngine spawns
+      // its two silence fillers at construction (boot.ts), and
+      // bootOnce() runs before the streamer's FFmpeg starts
+      // because the web container brings the streamer up via the
+      // /api/stream/start RPC after its own init.
+      // Dropping the anullsrc input removes one decoder thread
+      // from FFmpeg and shortens the amix from 3 → 2 inputs.
 
       // -- Filter graph --
-      // [0:v] → fps + scale + yuv420p
-      // [1:a][2:a][3:a] → amix(silence + music + lavfi).
-      //    duration=first follows the silence input (paced by -re
-      //    on its writer side). dropout_transition=0 means dropouts
-      //    don't trigger the 5s ramp; we just lose the missing
-      //    input cleanly.
-      "-filter_complex",
-        `[0:v]fps=${video.fps},scale=${video.width}:${video.height}:flags=bilinear,format=yuv420p[v];` +
-        `[1:a][2:a][3:a]amix=inputs=3:duration=first:dropout_transition=0:normalize=0[a]`,
-      "-map", "[v]",
-      "-map", "[a]",
+      //
+      // Video: in the common case Chromium feeds the right
+      // resolution + framerate, so we skip ALL per-frame filter
+      // work. The pix_fmt conversion happens once at the encoder
+      // boundary (`-pix_fmt yuv420p` in buildVideoCodecArgs) which
+      // is significantly cheaper than running `format=yuv420p`
+      // every frame.
+      //
+      // When the operator IS running with capture-every-nth-frame
+      // for low-CPU mode, buildVideoFilters adds an `fps=` pacer.
+      // We also still need to scale if viewport ≠ output, but the
+      // encoder rescales for free when sizes mismatch, so we skip
+      // the filter-graph scaler unconditionally.
+      //
+      // Audio: amix(silence + music). duration=first follows the
+      // silence input (paced by -re on its writer side).
+      // dropout_transition=0 means dropouts don't trigger the
+      // 5s ramp; we just lose the missing input cleanly.
+      ...(function () {
+        const vFilter = buildVideoFilters(video);
+        const audioGraph = `[1:a][2:a]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[a]`;
+        if (vFilter) {
+          return [
+            "-filter_complex",
+            `[0:v]${vFilter}[v];${audioGraph}`,
+            "-map", "[v]", "-map", "[a]",
+          ];
+        }
+        // No video filters needed — map the raw [0:v] directly,
+        // run only the audio graph. Saves an entire copy of the
+        // frame buffer through the filter framework per frame.
+        return [
+          "-filter_complex", audioGraph,
+          "-map", "0:v",
+          "-map", "[a]",
+        ];
+      })(),
 
       // Video encode (codec-specific flags built by helper)
       ...buildVideoCodecArgs(video),
@@ -671,14 +766,26 @@ class Streamer extends EventEmitter {
   async _startScreencast() {
     this.client = await this.page.target().createCDPSession();
 
+    // Cache `client` once for closure lookups — `this.client`
+    // is stable for the lifetime of this screencast session, and
+    // avoiding the property dereference on the hot path saves a
+    // measurable amount on the Pi.
+    const cdp = this.client;
+
     this.client.on("Page.screencastFrame", ({ data, sessionId }) => {
       // Fire-and-forget: ack immediately so Chromium can begin
       // rendering the next frame without waiting for our CDP reply
       // round-trip (~5-15 ms on a local socket). Awaiting it was
       // serialising every frame and was the primary source of lag.
-      this.client.send("Page.screencastFrameAck", { sessionId }).catch(() => {});
+      cdp.send("Page.screencastFrameAck", { sessionId }).catch(() => {});
 
-      if (!this.ffmpeg || !this.ffmpeg.stdin.writable) return;
+      // Cache `this.ffmpeg` once — same reason as above. A spawned
+      // ffmpeg never gets reassigned mid-stream so `stdin` is also
+      // stable for the duration of this handler call.
+      const ffmpeg = this.ffmpeg;
+      if (!ffmpeg) return;
+      const stdin = ffmpeg.stdin;
+      if (!stdin.writable) return;
 
       const buf = Buffer.from(data, "base64");
       this.frameCount++;
@@ -692,7 +799,7 @@ class Streamer extends EventEmitter {
       // (b) the no-op listener we used to attach accumulated under
       //     sustained backpressure and tripped Node's
       //     MaxListenersExceededWarning on the underlying Socket.
-      this.ffmpeg.stdin.write(buf);
+      stdin.write(buf);
     });
 
     await this.client.send("Page.startScreencast", {

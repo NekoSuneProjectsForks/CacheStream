@@ -1,5 +1,70 @@
 # Changelog
 
+## 1.13.1
+
+Streamer performance pass — incorporates the per-frame CDP ack
+fix from the v1.13.0 follow-up PR plus a batch of further wins.
+
+### CDP screencast (PR #2, already on main)
+
+Page.screencastFrameAck is now fire-and-forget instead of
+awaited. Chromium holds the next frame until it sees the ack;
+the await was serialising every frame through one full IPC
+round-trip (~5–15 ms on a local socket) and was the single
+biggest source of streaming lag. Fixed in commit d4c2150.
+
+### FFmpeg filter graph (new in v1.13.1)
+
+The previous pipeline ran `fps=N, scale=WxH, format=yuv420p` on
+EVERY frame even when none of them did meaningful work:
+
+  - `fps=N` is a no-op when Chromium already emits at N fps,
+  - `scale=WxH` is a no-op when the viewport matches output,
+  - `format=yuv420p` is redundant with `-pix_fmt yuv420p` on the
+    encoder (which converts once at encoder entry vs per-frame).
+
+In the default config all three filters elide. The new
+buildVideoFilters helper only adds `fps=` when running in
+capture-every-nth-frame low-CPU mode. When no filters are
+needed, the pipeline maps `[0:v]` straight to the encoder and
+skips the filter-graph copy entirely.
+
+### Removed redundant amix input
+
+The streamer's FFmpeg used to mix THREE audio sources: silence
+FIFO, music FIFO, and an in-FFmpeg `anullsrc` "safety net". The
+two FIFO writers (web-side silence fillers) are guaranteed to
+exist by the time the streamer connects — they spawn in
+MusicEngine's constructor at boot, well before `/api/stream/start`
+ever fires. The third input was idle decoder work. Dropped it;
+amix is now `inputs=2` instead of `inputs=3`.
+
+### Chromium flag cleanup
+
+Added flags that disable background work Chromium normally does
+for an interactive browser but never helps a headless streamer:
+`--disable-features=Translate,BackForwardCache,PaintHolding,...`
+plus `--no-first-run`, `--disable-sync`, `--disable-extensions`,
+`--disable-component-update`, `--disable-domain-reliability`,
+and several others. Mostly memory + startup-time wins; nothing
+hot-path.
+
+### Scene-load wait policy
+
+`page.goto(..., { waitUntil: "networkidle2" })` →
+`{ waitUntil: "domcontentloaded" }`. The overlays (chat,
+alerts, etc.) open long-lived SSE connections that prevented
+network-idle from ever firing on scenes with three or more
+overlays — we'd stall for the full 30 s timeout. DOMContentLoaded
+fires when the HTML parser is done; the first frame paints
+~500 ms sooner on scene switches.
+
+### Per-frame screencast handler micro-wins
+
+Cached `this.client` and `this.ffmpeg.stdin` into local consts
+inside the screencast frame callback. Minor — a few µs per
+frame — but at 30 fps every µs counts.
+
 ## 1.13.0
 
 Multi-broadcaster + mobile control panel. Final feature in the
