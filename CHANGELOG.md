@@ -1,5 +1,48 @@
 # Changelog
 
+## 1.10.1
+
+Memory leak hotfix for the web + streamer containers. Symptom on
+the Pi: web RSS climbed steadily over hours of streaming (often
+past 1GB), eventually OOM-killing or just becoming sluggish.
+
+### Root cause: SSE bus subscriptions leaked on scene reloads
+
+`/api/chat/stream`, `/api/alerts/stream`, `/api/games/pet/stream`,
+`/api/games/datacenter/stream` only ran cleanup when
+`req.signal.abort` fired. Behind nginx / Cloudflare Tunnel that
+event sometimes never propagates — the underlying socket closes
+but the abort fires late or not at all. Meanwhile the streamer
+reloads scene pages frequently (every scene switch, every
+restart), opening fresh SSE connections each time. The bus
+subscriptions from the old pages stayed attached, holding the
+ReadableStream controller + closure-captured state in memory
+forever.
+
+Fix: extracted `lib/sse.ts` with a hardened lifecycle. Cleanup
+now fires on the FIRST of: req.signal abort, an enqueue throwing
+(socket dead but abort hasn't fired), or the keepalive enqueue
+failing. All callbacks gate on `closed` so stale handlers can't
+fire writes against a torn-down controller.
+
+### Other leaks tidied
+
+- **Streamer `musicFifoFd`** (v1.7.3 keep-alive) — `_spawnFFmpeg`
+  is now idempotent: closes any stale fd before opening a new
+  one. Previously a fast reconnect cycle could leak one fd per
+  cycle.
+- **Bus listener high-water warning** — `subscribe()` now logs
+  `[bus] high listener count on "<topic>": <n>` when any topic
+  exceeds 30 listeners, so future leaks of this class are loud
+  instead of silent.
+
+### New diagnostic endpoint
+
+`GET /api/system/diag` (owner-only) reports `process.memoryUsage()`
++ live bus subscriber counts per topic. Curl it during a stream
+to confirm the leak is gone: the counts should sit at a small,
+stable value even after many scene switches.
+
 ## 1.10.0
 
 Overlay pack — three new scene overlays + a global toggle UI,

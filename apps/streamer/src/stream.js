@@ -484,6 +484,15 @@ class Streamer extends EventEmitter {
     // actually write anything; the real music engine writes when
     // a track plays. amix in the filter graph treats our empty
     // read side as "no data" and falls back to silence.fifo.
+    // Defensive: close any stale keep-alive fd before opening a
+    // new one. If _spawnFFmpeg is re-entered (e.g. reconnect after
+    // a crash) before the previous ffmpeg's exit handler ran, the
+    // old fd would leak — small, but it adds up over a long-lived
+    // streamer process that's reconnected many times.
+    if (this.musicFifoFd != null) {
+      try { fs.closeSync(this.musicFifoFd); } catch {}
+      this.musicFifoFd = null;
+    }
     try {
       this.musicFifoFd = fs.openSync(musicFifo, fs.constants.O_RDWR | fs.constants.O_NONBLOCK);
       this.logger.info({ musicFifo, fd: this.musicFifoFd }, "music fifo keep-alive opened");
