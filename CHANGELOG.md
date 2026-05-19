@@ -1,5 +1,50 @@
 # Changelog
 
+## 1.10.2
+
+Two-part hotfix: RTMP ingest latency down from 60-120 s to
+roughly 5-10 s, and scene switches no longer hard-cut.
+
+### Low-latency RTMP ingest
+
+The previous defaults were tuned for resilience over latency,
+which added massive delay on top of Twitch's own HLS ingest.
+v1.10.2 tightens both sides:
+
+- **nginx-rtmp**: `hls_fragment 2s → 1s`, `hls_playlist_length
+  10s → 3s`, `chunk_size 4096 → 1024`, `hls_sync 100ms`, plus
+  `tcp_nodelay on; sendfile off; tcp_nopush off` on the HTTP
+  side so segments flush as soon as they're written.
+- **hls.js (in /scene/ingest)**: `backBufferLength 10 → 4`,
+  `maxBufferLength 8 → 3`, new `maxMaxBufferLength: 6`,
+  `liveSyncDuration: 1`, `liveMaxLatencyDuration: 4`,
+  `maxLoadingDelay: 1`, plus an explicit `waiting`-event
+  watchdog that snaps the playhead to `hls.liveSyncPosition`
+  if it falls more than 2 s behind.
+
+Realistic end-to-end budget (OBS → Twitch):
+  OBS encode 1 s · nginx HLS 1 s · hls.js buffer 1.5 s · Chromium
+  decode 0.2 s · FFmpeg encode 0.5 s · Twitch HLS ingest ~3 s
+  → ≈ 7 s total.
+
+Operators who drop their OBS keyframe interval to 1 s (Settings
+→ Output) can pull this down to ~5 s on a fast LAN to the Pi.
+Anything below ~5 s starts depending on Twitch behaviour we
+can't control.
+
+### Scene transitions
+
+Switching scenes used to be a hard cut — the headless Chromium
+reload flashed blank for ~500 ms before snapping in. v1.10.2
+adds a 400 ms opacity+scale fade on `.cs-scene` mount (for
+SceneFrame-based scenes) and a 350 ms body-level opacity ramp
+(for Pet / Datacenter / Music / Ingest which manage their own
+root). Both animations are GPU-only (transform + opacity) so
+they hold 30 FPS in headless Chromium without burning extra CPU.
+
+Opt-out per scene with `class="cs-scene cs-no-transition"` on
+the wrapper.
+
 ## 1.10.1
 
 Memory leak hotfix for the web + streamer containers. Symptom on

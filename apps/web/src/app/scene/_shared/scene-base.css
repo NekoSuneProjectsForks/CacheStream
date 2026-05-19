@@ -23,6 +23,20 @@ html, body {
   text-rendering: geometricPrecision;
 }
 
+/* v1.10.2 page-level fade. Body-level so even scenes that don't
+   use the SceneFrame wrapper (Pet, Datacenter, Music, Ingest)
+   pick it up — the headless Chromium <html> reload otherwise
+   shows a hard cut. Pairs with the .cs-scene animation above for
+   SceneFrame-based scenes; either one alone is enough but both
+   firing together is harmless (same target, same direction). */
+body {
+  animation: cs-body-in 350ms ease-out both;
+}
+@keyframes cs-body-in {
+  0%   { opacity: 0; }
+  100% { opacity: 1; }
+}
+
 .cs-scene {
   position: relative;
   width: 100vw;
@@ -34,7 +48,26 @@ html, body {
   gap: 1.6rem;
   text-align: center;
   isolation: isolate;
+  /* v1.10.2 scene-mount fade. Every scene change replaces the
+     headless Chromium page; the streamer captures the first ~30
+     frames of that new page as part of the broadcast. A 400ms
+     opacity+scale ramp turns the hard cut into a brief crossfade-
+     like reveal — viewers see the new scene materialise rather
+     than snap-in.
+     GPU-only (transform + opacity), no layout thrash. */
+  animation: cs-scene-in 400ms cubic-bezier(.2, .8, .2, 1) both;
 }
+
+@keyframes cs-scene-in {
+  0%   { opacity: 0; transform: scale(1.012); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+/* Operators can opt out per-scene by adding `class="cs-scene cs-no-transition"`
+   on the wrapper — useful for scenes that have their own intro animation
+   they don't want compounding with ours (the AI Pet eye-blink intro, etc).
+   Author convenience, not currently used by any built-in. */
+.cs-scene.cs-no-transition { animation: none; }
 
 /* ----- Animated grid backdrop ----------------------------- */
 .cs-grid {

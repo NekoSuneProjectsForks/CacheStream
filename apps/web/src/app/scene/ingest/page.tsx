@@ -89,15 +89,46 @@ export default function IngestScene() {
           setPlayerErr("hls.js not supported in this browser");
           return;
         }
+        // Low-latency profile (v1.10.2). The defaults wait for
+        // ~30s of segments before starting playback and keep ~60s
+        // of buffer behind the playhead, which is exactly what we
+        // DON'T want for a live ingest. The values below pin
+        // playback as close to the live edge as the segment cadence
+        // allows. Combined with the 1s nginx-rtmp fragments this
+        // gets us ~2s of player-side latency.
         hls = new Hls({
           lowLatencyMode: true,
-          backBufferLength: 10,
-          maxBufferLength: 8,
+          backBufferLength: 4,        // keep 4s of seek history (was 10)
+          maxBufferLength: 3,         // never buffer more than 3s ahead (was 8)
+          maxMaxBufferLength: 6,      // hard cap on dynamic buffer growth
+          liveSyncDuration: 1,        // chase the edge: stay within 1 segment
+          liveMaxLatencyDuration: 4,  // panic-seek if we fall >4s behind
+          highBufferWatchdogPeriod: 1,
+          // Skip the default ABR ramp-up; the source is a single
+          // bitrate from nginx-rtmp so there's nothing to switch to.
+          startLevel: 0,
+          // Aggressive front-buffer fetch so a fresh playlist load
+          // doesn't sit waiting for the player's normal cadence.
+          maxLoadingDelay: 1,
+          manifestLoadingTimeOut: 4000,
+          manifestLoadingMaxRetry: 6,
+          fragLoadingTimeOut: 4000,
         });
         hls.loadSource(hlsUrl);
         hls.attachMedia(video);
         hls.on(Hls.Events.ERROR, (_e: unknown, data: any) => {
           if (data?.fatal) setPlayerErr(`hls fatal: ${data.type} ${data.details}`);
+        });
+        // Aggressively snap to the live edge whenever the player
+        // falls more than 2s behind (e.g. after a brief network
+        // stall). Without this, dropped segments compound into
+        // permanent extra latency over hours.
+        video.addEventListener("waiting", () => {
+          if (!hls) return;
+          const live = hls.liveSyncPosition;
+          if (typeof live === "number" && video.currentTime < live - 2) {
+            video.currentTime = live;
+          }
         });
         video.muted = false;
         video.play().catch(() => {});
