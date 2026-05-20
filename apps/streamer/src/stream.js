@@ -721,7 +721,19 @@ class Streamer extends EventEmitter {
       "-nostats",
 
       // Input 0: MJPEG frames over stdin
+      //
+      // v1.13.8: explicit `-framerate` on the input. Without it,
+      // FFmpeg's image2pipe demuxer defaults to 25 fps internally,
+      // then `-use_wallclock_as_timestamps 1` overrides each frame's
+      // timestamp with wall-clock. Chromium delivers ~30 fps from
+      // the screencast; the resulting PTS sequence ends up
+      // non-monotonic in burst conditions, and FFmpeg logs
+      // "Past duration too large" + drops frames. Telling the
+      // demuxer up-front that the expected rate is 30 (our
+      // configured `video.fps`) lines the timestamps up with the
+      // encoder's expectations and the noise stops.
       "-thread_queue_size", "32",
+      "-framerate", String(video.fps),
       "-use_wallclock_as_timestamps", "1",
       "-f", "image2pipe",
       "-vcodec", "mjpeg",

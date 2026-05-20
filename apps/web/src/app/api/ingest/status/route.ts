@@ -43,9 +43,20 @@ export async function GET(req: NextRequest) {
     // Primary check: nginx-rtmp /stat XML — authoritative because
     // it returns the actual publisher session state, not just the
     // presence of a stale HLS playlist file.
+    //
+    // v1.13.8: trust /stat when it returns 200. The previous code
+    // fell through to a HEAD on the .m3u8 file ANY time `live`
+    // came back false from /stat, including the normal "no
+    // publisher yet" case. That HEAD generated a 404 in nginx's
+    // error log on every panel poll for every configured key —
+    // very loud, no useful signal. Only fall back to the HEAD
+    // probe when /stat itself was unreachable (e.g. older nginx-
+    // rtmp build without stat support).
+    let statReachable = false;
     try {
       const r = await fetch("http://ingest:8080/stat", { cache: "no-store" });
       if (r.ok) {
+        statReachable = true;
         const xml = await r.text();
         const stream = findStream(xml, "live", key);
         if (stream) {
@@ -61,11 +72,10 @@ export async function GET(req: NextRequest) {
       lastError = `stat unreachable: ${err?.message || err}`;
     }
 
-    // Fallback: HEAD the HLS playlist. The /stat probe should
-    // always succeed when nginx-rtmp is healthy, but if for some
-    // reason the build doesn't include stat support we still want
-    // a sensible answer rather than reporting "offline" forever.
-    if (!live && !lastError?.startsWith("stat ")) {
+    // Fallback: HEAD the HLS playlist. Only runs when /stat itself
+    // couldn't answer — supports older nginx-rtmp builds without
+    // stat compiled in.
+    if (!statReachable && !live) {
       try {
         const r = await fetch(
           `http://ingest:8080/hls/${encodeURIComponent(key)}.m3u8`,

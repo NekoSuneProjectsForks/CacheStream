@@ -1,5 +1,44 @@
 # Changelog
 
+## 1.13.8
+
+Three log-noise fixes — `docker compose logs` was unreadable on
+a healthy idle deployment because of unnecessary 404s and
+ffmpeg pacing warnings.
+
+### `/api/ingest/status` no longer probes the .m3u8 unnecessarily
+
+The endpoint had two independent liveness checks: `/stat` XML
+(authoritative) and a HEAD on the `.m3u8` (fallback for older
+nginx-rtmp builds). The fallback fired ANY time `/stat` said
+the stream wasn't live — including the normal "no publisher
+yet" case — generating a 404 per panel poll per key. For three
+configured keys polled every second that was ~180 entries per
+minute in the ingest error log.
+
+The HEAD probe now only runs when `/stat` itself was
+unreachable. If `/stat` returns 200 with no stream, we trust it.
+
+### nginx `log_not_found off;` on the HLS location
+
+Belt-and-braces for any remaining 404s (mods or dev poking the
+URL directly). The HTTP response is still 404; only the
+error-log entry is suppressed.
+
+### Streamer FFmpeg `-framerate` hint on the MJPEG input
+
+Without an explicit input framerate, the image2pipe demuxer
+defaulted to 25 fps internally. Combined with
+`-use_wallclock_as_timestamps 1` + Chromium's ~30 fps
+screencast output, PTS sequences went non-monotonic during
+brief bursts and FFmpeg logged "Past duration too large" +
+"dropping frame N from stream 0" on every glitch. Telling the
+demuxer the expected rate upfront via `-framerate <fps>`
+aligns timestamps and silences the spam.
+
+The actual broadcast quality is unchanged — these were never
+visible to viewers, just panel-operator-noise.
+
 ## 1.13.7
 
 Proper secret-handling for RTMP stream keys in the panel.
