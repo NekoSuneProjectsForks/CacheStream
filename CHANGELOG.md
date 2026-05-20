@@ -1,5 +1,112 @@
 # Changelog
 
+## 1.13.3
+
+Long-stream stability — fixes the issue where the streamer
+would silently die after 10+ hours and not reconnect.
+
+### Frame-flow watchdog
+
+A new module-level interval polls every 5 s; if the streamer is
+in `state === "running"` but the screencast hasn't delivered a
+frame to FFmpeg in `STREAM_WATCHDOG_TIMEOUT_SECONDS` (default
+30 s), it forces a reconnect.
+
+Catches the silent-death failure mode where nothing crashes
+outright but the Chromium → FFmpeg pipe goes quiet: TCP idle
+drop on the RTMP push, dead CDP screencast session after a v8
+GC pause, page-renderer hang, etc. Set the env to `0` to disable.
+
+### Periodic Chromium recycle
+
+Every `STREAM_BROWSER_RECYCLE_HOURS` (default 6 h) of healthy
+uptime, the streamer proactively tears down + restarts the
+pipeline. Defends against gradual Chromium memory bloat and
+state accumulation that, over a multi-hour stream, has been
+observed to silently break the broadcast.
+
+Six hours is conservative — most streams are over before it
+fires. Bump to a higher value if you do longer single sessions.
+Set to `0` to disable.
+
+### Bounded teardown
+
+`_teardown()` is now wrapped in a `Promise.race` against a
+`STREAM_TEARDOWN_TIMEOUT_SECONDS` (default 10 s) deadline. If
+`browser.close()` or any other step hangs (Chromium with a
+leaked tab after 10 h occasionally does), we proceed anyway
+and `SIGKILL` the leftover processes. Previously a wedged
+close could hang the reconnect cycle indefinitely.
+
+Also, after the timeout fires, the streamer aggressively
+`SIGKILL`s the underlying Chromium PID via
+`browser.process().kill('SIGKILL')` so file descriptors and
+sockets actually get released — `browser.close()` alone leaks
+them when the process is stuck.
+
+### Re-entrant reconnect race fix
+
+The previous `_scheduleReconnect()` guard was
+`if (this.restartTimer) return`. Inside the timer body,
+`this.restartTimer = null` was cleared BEFORE `_teardown()`'s
+await started — leaving a window where a parallel event
+(FFmpeg exit, browser disconnect, watchdog) could fire
+`_scheduleReconnect` again and start a SECOND reconnect cycle
+concurrently. Over a 10 h stream those races compounded into
+a wedged streamer.
+
+Now we hold a `this.reconnecting` flag for the FULL teardown +
+`_runOnce()` duration, so parallel triggers bail cleanly and
+the in-flight cycle completes (or fails) before another can
+start.
+
+### New env vars
+
+  STREAM_WATCHDOG_TIMEOUT_SECONDS=30
+  STREAM_BROWSER_RECYCLE_HOURS=6
+  STREAM_TEARDOWN_TIMEOUT_SECONDS=10
+
+All optional; sensible defaults kick in if unset.
+
+## 1.13.2
+
+Latency & performance pass.
+
+Bug fixes:
+- streamer: `setScene()` was using `waitUntil: networkidle2` instead
+  of `domcontentloaded`, causing every panel-triggered scene switch
+  to stall 500 ms – 30 s when SSE connections (chat, alerts, games)
+  were open. Matches the fix already applied to `_openScene()` in
+  v1.13.1.
+
+Performance improvements:
+- streamer: reduce FFmpeg `thread_queue_size` from 1024 → 32 on all
+  three inputs (video stdin, silence FIFO, music FIFO). A 1024-slot
+  queue allows up to 34 seconds of buffered frames; 32 keeps in-
+  flight depth under ~1 s, appropriate for a live push pipeline.
+- streamer: reconnect delay is now exponential backoff (starts at
+  1 s, doubles each attempt, caps at `RECONNECT_DELAY_SECONDS`)
+  rather than a fixed interval. Resets to 1 s on a clean start.
+- streamer: VOD FFmpeg no longer applies an unconditional `scale=`
+  filter. Removed the `sws_scale` pass that ran on every frame
+  even when source dimensions already matched the output spec.
+- eventsub: all 8 EventSub subscription POSTs sent in parallel via
+  `Promise.allSettled()` instead of sequentially. Reduces setup
+  time from ~1.4 s (8 × serial round-trip) to ~200 ms (one round-
+  trip).
+- eventsub: initial reconnect backoff reduced from 1000 ms → 250 ms.
+  Faster recovery from transient Twitch edge drops.
+- streamer-client: RPC timeout is now differentiated per endpoint.
+  `/start` and `/restart` keep a 20 s budget (Chromium launch);
+  others (`/status`, `/stop`, `/scene`, `/overlays`, `/vod/*`,
+  `/ingest`) use 5 s so a hung streamer fails fast.
+- db: SQLite now sets `synchronous=NORMAL` (safe in WAL mode,
+  removes per-commit fsync), `mmap_size=256MB`, `temp_store=MEMORY`,
+  `cache_size=20MB`.
+- db: `kvGet/kvSet/kvDelete` cache their prepared statements at
+  module level — previously `prepare()` was called on every
+  invocation, re-parsing the SQL each time.
+
 ## 1.13.1
 
 Streamer performance pass — incorporates the per-frame CDP ack

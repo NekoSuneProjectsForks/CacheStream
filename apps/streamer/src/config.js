@@ -123,6 +123,29 @@ function buildConfig({ logger } = {}) {
       thermalMonitor: toBool(process.env.STREAM_THERMAL_MONITOR, true),
       thermalThrottleC: toInt(process.env.STREAM_THERMAL_THROTTLE_C, 80),
       thermalRecoverC:  toInt(process.env.STREAM_THERMAL_RECOVER_C,  68),
+      // Watchdog (v1.13.3). If we're in the "running" state but the
+      // screencast hasn't delivered a frame to FFmpeg in this many
+      // seconds, force a reconnect. Catches the long-stream silent-
+      // death failure mode where nothing crashes outright but the
+      // Chromium → FFmpeg pipe goes quiet (TCP idle drop on the
+      // RTMP push, dead screencast session after a v8 GC pause,
+      // etc.). 30s is generous enough to ride out hiccups and tight
+      // enough to recover within a fraction of a minute. Set to 0
+      // to disable.
+      watchdogTimeoutMs: toInt(process.env.STREAM_WATCHDOG_TIMEOUT_SECONDS, 30) * 1000,
+      // Periodic Chromium recycle (v1.13.3). After this many hours
+      // of healthy uptime, the streamer proactively tears down +
+      // restarts the pipeline. Defends against gradual Chromium
+      // memory bloat + state accumulation that, over 10h+, has been
+      // observed to silently break the stream. 0 = disabled.
+      // Default 6h is conservative — large enough that most
+      // streams are over before it ever fires.
+      browserRecycleMs: toInt(process.env.STREAM_BROWSER_RECYCLE_HOURS, 6) * 3600 * 1000,
+      // Teardown deadline (v1.13.3). If `_teardown()` runs longer
+      // than this, we proceed anyway and let the OS clean up the
+      // zombie processes. Prevents reconnect from hanging forever
+      // on a wedged Chromium close().
+      teardownTimeoutMs: toInt(process.env.STREAM_TEARDOWN_TIMEOUT_SECONDS, 10) * 1000,
     },
   };
 }

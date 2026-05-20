@@ -204,6 +204,24 @@ class Streamer extends EventEmitter {
     this.shouldRun = false; // user intent — survives reconnects
     this.reconnectBackoffMs = 1000;
 
+    // Reconnect re-entrance guard (v1.13.3). Set true the moment a
+    // reconnect cycle begins; cleared only after _runOnce() resolves
+    // or fails. Without this, the old guard `restartTimer != null`
+    // was nulled BEFORE _teardown() started awaiting, leaving a
+    // window where a second event (FFmpeg exit, browser disconnect)
+    // could fire _scheduleReconnect again and start a parallel
+    // reconnect cycle. Over a 10h stream those races compound.
+    this.reconnecting = false;
+
+    // Watchdog state (v1.13.3). Set when the screencast first
+    // delivers a frame after a successful start; checked by the
+    // module-level interval to detect a "looks running but nothing
+    // flowing" hang and force a reconnect.
+    this.watchdogTimer = null;
+    // Periodic Chromium recycle (v1.13.3). Defends against gradual
+    // Chromium memory bloat on long streams.
+    this.recycleTimer = null;
+
     // VOD mode: when active, the screencast pipeline is torn
     // down and a direct file-to-RTMP FFmpeg takes over.
     this.vod = null;          // { id, name, kind, pathOrUrl, loop }
@@ -395,12 +413,101 @@ class Streamer extends EventEmitter {
     this.emit("status", this.status());
   }
 
+  // ---- v1.13.3 long-stream stability ----------------------------
+
+  /**
+   * Frame-flow watchdog. Polls every 5s; if `state === "running"`
+   * but `lastFrameAt` hasn't advanced in `watchdogTimeoutMs`,
+   * force a reconnect. Catches the "everything looks healthy but
+   * the broadcast went silent" failure mode (TCP idle drop on the
+   * RTMP push side, dead CDP screencast session, etc.) that
+   * accumulated over multi-hour streams.
+   *
+   * Disabled when watchdogTimeoutMs === 0.
+   */
+  _startWatchdog() {
+    this._stopWatchdog();
+    const timeoutMs = this.config.runtime.watchdogTimeoutMs;
+    if (!timeoutMs || timeoutMs <= 0) return;
+
+    this.watchdogTimer = setInterval(() => {
+      if (this.state !== "running") return;
+      // No frames yet — startup grace period. _startScreencast()
+      // has resolved but frames haven't started arriving; the FFmpeg
+      // exit handler will trigger reconnect if this is fatal.
+      if (!this.lastFrameAt) return;
+      const idleMs = Date.now() - this.lastFrameAt;
+      if (idleMs > timeoutMs) {
+        this.logger.warn(
+          { idleMs, watchdogTimeoutMs: timeoutMs },
+          "watchdog: no screencast frames for too long, forcing reconnect",
+        );
+        // Stop polling — _scheduleReconnect → _teardown → next
+        // _runOnce will re-start it. If we DON'T stop here, the
+        // watchdog could fire again during teardown and queue a
+        // second reconnect.
+        this._stopWatchdog();
+        this._scheduleReconnect();
+      }
+    }, 5000);
+  }
+  _stopWatchdog() {
+    if (this.watchdogTimer) {
+      clearInterval(this.watchdogTimer);
+      this.watchdogTimer = null;
+    }
+  }
+
+  /**
+   * Periodic Chromium recycle. After `browserRecycleMs` of healthy
+   * uptime, proactively force a reconnect. Tear-down + relaunch
+   * resets Chromium's memory + V8 heap and clears any accumulated
+   * GPU / compositor state we don't have visibility into.
+   *
+   * Defaults to 6h. Set STREAM_BROWSER_RECYCLE_HOURS=0 to disable.
+   */
+  _startRecycleTimer() {
+    this._stopRecycleTimer();
+    const ms = this.config.runtime.browserRecycleMs;
+    if (!ms || ms <= 0) return;
+
+    this.recycleTimer = setTimeout(() => {
+      this.recycleTimer = null;
+      // Only recycle while we're actually running, not during a
+      // reconnect or while playing a VOD (which has its own ffmpeg
+      // pipeline this doesn't apply to).
+      if (this.state !== "running" || this.vod) {
+        this._startRecycleTimer();
+        return;
+      }
+      this.logger.info(
+        { afterMs: ms },
+        "scheduled Chromium recycle — restarting pipeline",
+      );
+      this._scheduleReconnect();
+    }, ms);
+  }
+  _stopRecycleTimer() {
+    if (this.recycleTimer) {
+      clearTimeout(this.recycleTimer);
+      this.recycleTimer = null;
+    }
+  }
+
   async _runOnce() {
     await this._launchBrowser();
     await this._openScene();
     this._spawnFFmpeg();
     await this._startScreencast();
     await this._reapplyOverlays();
+
+    // Reset frame-flow tracking + start watchdogs for this run.
+    // _startScreencast() resolves before the first frame arrives,
+    // so we don't have lastFrameAt yet — the watchdog tolerates
+    // that with the `if (!this.lastFrameAt) return` guard.
+    this.lastFrameAt = null;
+    this._startWatchdog();
+    this._startRecycleTimer();
 
     this.logger.info(
       {
@@ -905,7 +1012,17 @@ class Streamer extends EventEmitter {
   }
 
   _scheduleReconnect() {
-    if (!this.shouldRun || this.restartTimer) return;
+    // v1.13.3: re-entrance guard combines both the timer AND the
+    // in-flight reconnect work. Previously `this.restartTimer` was
+    // cleared inside the setTimeout body BEFORE _teardown()'s await
+    // started — leaving a window where a parallel event (FFmpeg
+    // exit, browser disconnect, watchdog) could fire
+    // _scheduleReconnect again and start a SECOND reconnect cycle
+    // concurrently. Over a 10h stream the races compounded into a
+    // wedged streamer.
+    if (!this.shouldRun) return;
+    if (this.restartTimer || this.reconnecting) return;
+
     const delay = this.reconnectBackoffMs;
     this.reconnectBackoffMs = Math.min(this.reconnectBackoffMs * 2, this.config.runtime.reconnectDelayMs);
     this.logger.warn({ delayMs: delay }, "scheduling reconnect");
@@ -913,9 +1030,12 @@ class Streamer extends EventEmitter {
 
     this.restartTimer = setTimeout(async () => {
       this.restartTimer = null;
-      await this._teardown();
-      if (!this.shouldRun) return;
+      // Lock out parallel reconnects for the entire teardown +
+      // runOnce window.
+      this.reconnecting = true;
       try {
+        await this._teardown();
+        if (!this.shouldRun) return;
         await this._runOnce();
         this.reconnectBackoffMs = 1000;
         this.startedAt = Date.now();
@@ -923,8 +1043,13 @@ class Streamer extends EventEmitter {
       } catch (err) {
         this.logger.error({ err }, "reconnect failed");
         this.error = err.message;
+        // Release the lock BEFORE recursing so the new
+        // _scheduleReconnect call passes the guard.
+        this.reconnecting = false;
         this._scheduleReconnect();
+        return;
       }
+      this.reconnecting = false;
     }, delay);
   }
 
@@ -1063,31 +1188,74 @@ class Streamer extends EventEmitter {
   }
 
   async _teardown() {
-    if (this.client) {
-      try { await this.client.send("Page.stopScreencast"); } catch {}
-      try { await this.client.detach(); } catch {}
-      this.client = null;
-    }
-    if (this.ffmpeg) {
-      const proc = this.ffmpeg;
+    // v1.13.3: stop the watchdog + recycle timers FIRST so they
+    // can't fire during the teardown window and re-trigger us.
+    this._stopWatchdog();
+    this._stopRecycleTimer();
+
+    // v1.13.3: bound the whole teardown by `teardownTimeoutMs`. If
+    // `browser.close()` or any other step hangs (Chromium with a
+    // leaked tab after 10h occasionally does), we proceed anyway
+    // and let the OS reap the zombie processes. The next
+    // `_runOnce()` spawns a fresh browser so the leaked one isn't
+    // load-bearing.
+    const deadline = this.config.runtime.teardownTimeoutMs || 10_000;
+    const teardownWork = (async () => {
+      if (this.client) {
+        try { await this.client.send("Page.stopScreencast"); } catch {}
+        try { await this.client.detach(); } catch {}
+        this.client = null;
+      }
+      if (this.ffmpeg) {
+        const proc = this.ffmpeg;
+        this.ffmpeg = null;
+        try { proc.stdin.end(); } catch {}
+        await new Promise((resolve) => {
+          const killTimer = setTimeout(() => { try { proc.kill("SIGKILL"); } catch {} }, 3_000);
+          proc.once("exit", () => { clearTimeout(killTimer); resolve(); });
+          try { proc.kill("SIGTERM"); } catch { resolve(); }
+        });
+      }
+      if (this.musicFifoFd != null) {
+        try { fs.closeSync(this.musicFifoFd); } catch {}
+        this.musicFifoFd = null;
+      }
+      if (this.page) {
+        try { await this.page.close({ runBeforeUnload: false }); } catch {}
+        this.page = null;
+      }
+      if (this.browser) {
+        // Try graceful close first, but if Chromium is wedged the
+        // outer deadline race will move us past it. browser.process()
+        // gives us the underlying child process; SIGKILL on it is
+        // guaranteed to release the file descriptors + sockets the
+        // hung browser is holding.
+        const proc = this.browser.process?.();
+        try { await this.browser.close(); } catch {}
+        try { proc?.kill?.("SIGKILL"); } catch {}
+        this.browser = null;
+      }
+    })();
+
+    let timedOut = false;
+    await Promise.race([
+      teardownWork,
+      new Promise((resolve) => setTimeout(() => { timedOut = true; resolve(); }, deadline)),
+    ]);
+    if (timedOut) {
+      this.logger.warn({ deadline }, "_teardown exceeded deadline; force-killing leftovers");
+      // Aggressive cleanup. Anything that didn't tear down in the
+      // window above gets SIGKILL'd here and zeroed out so the next
+      // _runOnce() doesn't trip on stale handles.
+      try { this.client = null; } catch {}
+      try { this.ffmpeg?.kill?.("SIGKILL"); } catch {}
       this.ffmpeg = null;
-      try { proc.stdin.end(); } catch {}
-      await new Promise((resolve) => {
-        const killTimer = setTimeout(() => { try { proc.kill("SIGKILL"); } catch {} }, 3_000);
-        proc.once("exit", () => { clearTimeout(killTimer); resolve(); });
-        try { proc.kill("SIGTERM"); } catch { resolve(); }
-      });
-    }
-    if (this.musicFifoFd != null) {
-      try { fs.closeSync(this.musicFifoFd); } catch {}
-      this.musicFifoFd = null;
-    }
-    if (this.page) {
-      try { await this.page.close({ runBeforeUnload: false }); } catch {}
-      this.page = null;
-    }
-    if (this.browser) {
-      try { await this.browser.close(); } catch {}
+      if (this.musicFifoFd != null) {
+        try { fs.closeSync(this.musicFifoFd); } catch {}
+        this.musicFifoFd = null;
+      }
+      try { this.page = null; } catch {}
+      try { this.browser?.process?.()?.kill?.("SIGKILL"); } catch {}
       this.browser = null;
     }
   }
