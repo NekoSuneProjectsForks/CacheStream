@@ -1,5 +1,72 @@
 # Changelog
 
+## 1.13.6
+
+RTMP ingest overhaul. Reports of "OBS connected but 0 frames at
+our server" traced back to the ingest sidecar.
+
+### Root cause: abandoned upstream image
+
+The ingest service was running `tiangolo/nginx-rtmp:latest`, an
+image that hasn't been touched since 2018. Its `nginx-rtmp-module`
+build pre-dates a lot of changes in modern encoders — OBS 30+'s
+Enhanced RTMP signalling, current Twitch / YouTube ingest
+behaviours, etc. Newer OBS versions could open the TCP connection
++ send the publish handshake without nginx-rtmp ever forwarding
+the data into the HLS pipeline. Result: OBS shows green, panel
+shows "idle", zero frames.
+
+### Fix: build our own ingest image
+
+`apps/ingest/Dockerfile` is a small two-stage Debian-slim build:
+- Stage 1: `apt-get build-essential`, fetch nginx 1.27.4 +
+  `nginx-rtmp-module` 1.2.2 (latest stable), compile +
+  `make install`.
+- Stage 2: copy the binary + minimal runtime libs into a clean
+  image with `tini` as PID 1. ~50 MB.
+
+Multi-arch (amd64 + arm64) builds added to `.github/workflows/release.yml`
+alongside the existing `cachestream-web` + `cachestream-streamer`
+images. Pi 5 + amd64 hosts both get a native build via QEMU.
+
+### Diagnostics + UX wins
+
+- nginx-rtmp **/stat XML feed** exposed on the internal HTTP port.
+  The `/api/ingest/status` endpoint now parses this for real
+  inbound bitrate, publisher IP, video codec + resolution.
+  "Live: true" now means a publisher is actually pushing, not
+  just that there's a stale HLS playlist file on disk.
+- **nginx error_log + access_log → stderr/stdout** so
+  `docker compose logs ingest` shows every publish/play event +
+  the client IP. Was previously silent.
+- **`pushUrl` returns a real URL**: derives from PUBLIC_URL's
+  hostname (or `RTMP_PUBLIC_HOST` env override), no more
+  `rtmp://<host>:1935/live` literal placeholder text the
+  operator had to mentally substitute.
+- **Multi-key card** in the Sources tab now surfaces the live
+  bitrate + publisher IP per key, plus a prominent Server URL
+  copy box at the top.
+- **`hls_continuous on`** prevents brief audio dropouts during
+  scene cuts from stalling the HLS player.
+
+### New env
+
+- `RTMP_PUBLIC_HOST` (optional): explicit hostname/IP the panel
+  shows operators for the OBS push URL. Set this when the panel
+  is behind a tunneled https domain but RTMP must reach the host
+  on a different address (LAN IP, separate server, etc.).
+
+### Migration
+
+`docker compose up -d --build` will rebuild the ingest container
+from the new Dockerfile. Existing `cachestream-ingest-hls`
+volume is reused as-is. Once `cachestream-ingest:latest` is
+published to GHCR (next release build), `docker compose pull`
+will work too.
+
+If a stream was already configured, OBS settings don't change
+— same server URL, same stream key.
+
 ## 1.13.5
 
 Memory leak audit + fixes. Client reports of the streamer

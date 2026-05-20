@@ -90,7 +90,10 @@ services:
   #   http://ingest:8080/hls/<key>.m3u8
   # ---------------------------------------------------------
   ingest:
-    image: tiangolo/nginx-rtmp:latest
+    build:
+      context: ./apps/ingest
+      dockerfile: Dockerfile
+    image: cachestream-ingest:latest
     container_name: cachestream-ingest
     restart: unless-stopped
     ports:
@@ -98,8 +101,19 @@ services:
     expose:
       - "8080"                      # HLS consumed internally by the streamer/web
     volumes:
-      - ./apps/ingest/nginx.conf:/etc/nginx/nginx.conf:ro
+      # v1.13.6: now mounts to our own image's nginx config path
+      # rather than the path tiangolo/nginx-rtmp used. The custom
+      # image installs nginx under /usr/local/nginx (not /etc/nginx)
+      # so we can ship a vanilla mainline build + a known-good
+      # nginx-rtmp-module version we control.
+      - ./apps/ingest/nginx.conf:/usr/local/nginx/conf/nginx.conf:ro
       - cachestream-ingest-hls:/tmp/hls
+    healthcheck:
+      test: ["CMD", "sh", "-c", "wget -qO- http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
 volumes:
   cachestream-data:

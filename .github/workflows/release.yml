@@ -33,13 +33,18 @@ jobs:
     runs-on: ubuntu-latest
 
     strategy:
-      # Build both images in parallel — they're independent.
+      # Build all three images in parallel — they're independent.
+      # v1.13.6 added cachestream-ingest (custom nginx-rtmp image)
+      # so we own the version of the rtmp module + can bake the
+      # CacheStream-specific defaults straight into the binary.
       matrix:
         include:
           - image: cachestream-web
             context: ./apps/web
           - image: cachestream-streamer
             context: ./apps/streamer
+          - image: cachestream-ingest
+            context: ./apps/ingest
 
     steps:
       - uses: actions/checkout@v4

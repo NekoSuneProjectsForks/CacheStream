@@ -51,6 +51,21 @@ interface IngestKey {
   label: string;
   live: boolean;
   startedAt: number | null;
+  bitrateKbps?: number;
+  clientAddr?: string | null;
+}
+
+interface IngestStatus {
+  key: string;
+  enabled: boolean;
+  live: boolean;
+  pushUrl: string;
+  streamKey: string;
+  bitrateKbps: number;
+  clientAddr: string | null;
+  startedAt: number | null;
+  publisherInfo: { width: number; height: number; codec: string } | null;
+  lastError: string | null;
 }
 
 export function SourcesTab() {
@@ -289,10 +304,36 @@ function MultiKeySection() {
   const [keys, setKeys] = useState<IngestKey[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [draftLabel, setDraftLabel] = useState("");
+  const [pushUrl, setPushUrl] = useState<string>("");
 
   const refresh = async () => {
-    try { setKeys(await apiJson("/api/ingest/keys")); }
-    catch (e: any) { setError(e.message); }
+    try {
+      const ks = await apiJson("/api/ingest/keys") as IngestKey[];
+      // v1.13.6: pull richer per-key liveness + bitrate from the
+      // status endpoint (which now reads nginx-rtmp's /stat XML).
+      // The keys-list endpoint only knows configured keys, not
+      // their real-time inbound state.
+      const enriched = await Promise.all(ks.map(async (k) => {
+        try {
+          const s = await apiJson(`/api/ingest/status?k=${encodeURIComponent(k.key)}`) as IngestStatus;
+          return {
+            ...k,
+            live: s.live,
+            bitrateKbps: s.bitrateKbps,
+            clientAddr: s.clientAddr,
+          };
+        } catch { return k; }
+      }));
+      setKeys(enriched);
+
+      // Cache the push URL once (it's the same for every key).
+      if (ks.length > 0) {
+        try {
+          const s = await apiJson(`/api/ingest/status?k=${encodeURIComponent(ks[0].key)}`) as IngestStatus;
+          if (s.pushUrl) setPushUrl(s.pushUrl);
+        } catch {}
+      }
+    } catch (e: any) { setError(e.message); }
   };
   useEffect(() => { refresh(); const id = setInterval(refresh, 5000); return () => clearInterval(id); }, []);
 
@@ -334,6 +375,10 @@ function MultiKeySection() {
     } catch (err: any) { setError(err.message); }
   };
 
+  const copy = async (text: string) => {
+    try { await navigator.clipboard.writeText(text); } catch {}
+  };
+
   return (
     <section className="card">
       <div className="card-head">
@@ -342,9 +387,32 @@ function MultiKeySection() {
       </div>
       <p className="hint">
         Push from multiple encoders simultaneously, switch between them on the
-        fly. Each key becomes its own scene preset. Push URL is
-        <code> rtmp://&lt;host&gt;:1935/live</code> with the stream key shown.
+        fly. Each key becomes its own scene preset. In OBS / your encoder,
+        paste the <strong>Server</strong> URL below and one of the
+        <strong> Stream Keys</strong> — the panel will show the live
+        bitrate + publisher IP within a few seconds of you hitting Start
+        Streaming.
       </p>
+
+      {/* v1.13.6: prominently surface the push URL so operators don't
+          have to mentally fill in <host>. The endpoint derives this
+          from PUBLIC_URL or RTMP_PUBLIC_HOST. */}
+      {pushUrl && (
+        <div className="row gap" style={{ marginBottom: 10, alignItems: "center" }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 10, letterSpacing: ".22em", textTransform: "uppercase",
+                          color: "var(--text-mute)", marginBottom: 4 }}>
+              Server URL (paste into OBS → Settings → Stream → Server)
+            </div>
+            <code style={{ display: "block", padding: "8px 12px",
+                            background: "rgba(0,0,0,.35)", borderRadius: 3,
+                            fontSize: 13, overflowX: "auto", whiteSpace: "nowrap" }}>
+              {pushUrl}
+            </code>
+          </div>
+          <button className="btn-ghost sm" onClick={() => copy(pushUrl)}>Copy</button>
+        </div>
+      )}
 
       <div className="row gap" style={{ marginBottom: 10 }}>
         <input className="input"
@@ -361,8 +429,15 @@ function MultiKeySection() {
           <li key={k.key} className="row gap" style={{ alignItems: "center" }}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontWeight: 700 }}>{k.label || k.key}</div>
-              <div className="muted mono" style={{ fontSize: 11 }}>{k.key}</div>
+              <div className="muted mono" style={{ fontSize: 11 }}>key: {k.key}</div>
+              {k.live && (
+                <div className="muted" style={{ fontSize: 11, color: "#4ade80", marginTop: 2 }}>
+                  {k.bitrateKbps ? `${k.bitrateKbps} kbps` : "publishing"}
+                  {k.clientAddr ? ` · from ${k.clientAddr}` : ""}
+                </div>
+              )}
             </div>
+            <button className="btn-ghost sm" onClick={() => copy(k.key)} title="Copy stream key">📋 key</button>
             <span className={`badge ${k.live ? "badge-ok" : ""}`}>
               {k.live ? "LIVE" : "idle"}
             </span>
