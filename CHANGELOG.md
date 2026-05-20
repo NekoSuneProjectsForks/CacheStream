@@ -1,5 +1,87 @@
 # Changelog
 
+## 1.13.5
+
+Memory leak audit + fixes. Client reports of the streamer
+climbing to 70-80% memory over long streams traced back to
+five distinct issues. The big one is fixed; the rest are
+defensive hardening + observability so future leaks of this
+class are visible BEFORE the host OOM-kills the container.
+
+### #1 (CRITICAL) — Screencast frame buffer overrun
+
+The screencast handler used `stdin.write(buf)` unconditionally,
+ignoring the return value. When FFmpeg stalled (HW encoder
+hiccup, RTMP push backpressure, disk IO spike), Node buffered
+the unwritten frames INTERNALLY without bound. The OS pipe
+holds only ~64 KB; anything beyond that lived in Node's
+`Writable._writableState.buffered` chain forever.
+
+At 30 fps × ~100 KB JPEG ≈ 3 MB/s, even a 30-second stall
+queues ~90 MB. Over a 10-hour stream with intermittent stalls,
+this single mechanism could push the streamer container to
+70-80% memory on a Pi 5 — exactly the reported symptom.
+
+Fix: before writing, check `stdin.writableLength`. If more than
+~256 KB (about 3 frames' worth) is already buffered, the frame
+is dropped entirely. A live stream values fresh frames over a
+queue of stale ones, and Twitch's encoder fills brief gaps by
+repeating the previous frame. Dropped frames are now counted
+and reported in `/status` as `framesDropped`.
+
+### #2 — Silence-filler stdio leakage
+
+Both web-side silence fillers (`SILENCE_FIFO` + `MUSIC_FIFO`
+writers) spawned FFmpeg with `stdio: ["ignore", "ignore", "pipe"]`
+where stderr was piped but **never read**. Every byte FFmpeg
+wrote sat in Node's pipe buffer forever. At `loglevel=error`
+this is rare but not zero — and across a multi-week container
+uptime, small accumulations add up.
+
+Fix: `stdio: ["ignore", "ignore", "ignore"]`. The OS now
+discards stderr at the source, nothing to accumulate.
+
+### #3 — Main + VOD FFmpeg unread stdout
+
+The streamer's main FFmpeg and the VOD-playback FFmpeg both
+spawned with `stdout: "pipe"` — neither had a consumer. FFmpeg
+writes RTMP to the output URL, not stdout, so the leak rate
+was tiny, but the buffer was unbounded and there's no reason
+to keep it open.
+
+Fix: `stdout: "ignore"` on both. The music writer (track
+playback) gets the same treatment.
+
+### #4 — Memory-pressure recycle
+
+A new watchdog check: if the streamer process RSS exceeds
+`STREAM_MEMORY_RECYCLE_LIMIT_MB` (default 1500 MB), force an
+immediate pipeline recycle. This is independent of the
+existing periodic 6 h recycle, so a fast leak gets caught long
+before the periodic timer fires.
+
+Default 1500 MB is comfortable for a Pi 5 (8 GB) running the
+streamer container with its typical 800-1200 MB working set.
+Set the env var to `0` to disable.
+
+### #5 — Observability
+
+`GET /status` now reports:
+
+  - `framesDropped` — running total of dropped frames (#1 above)
+  - `memory` — RSS / heap / external in MB
+  - `stdinBufferedKB` — current FFmpeg stdin backlog in KB
+
+So you can see backpressure building up + memory growth from
+the panel without SSHing in.
+
+### Recommended action
+
+Hit Update on the panel. If your stream is currently
+misbehaving, the panel's Status tab will start showing the new
+`framesDropped` + `memory` fields, so you can confirm the leak
+is contained over the next few hours.
+
 ## 1.13.4
 
 Fixes the "chat games keep breaking" problem.

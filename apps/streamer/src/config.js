@@ -146,6 +146,17 @@ function buildConfig({ logger } = {}) {
       // zombie processes. Prevents reconnect from hanging forever
       // on a wedged Chromium close().
       teardownTimeoutMs: toInt(process.env.STREAM_TEARDOWN_TIMEOUT_SECONDS, 10) * 1000,
+      // Memory-pressure recycle threshold (v1.13.5). If the
+      // streamer process RSS exceeds this many megabytes the
+      // watchdog forces an immediate pipeline recycle, freeing
+      // the Chromium + FFmpeg memory before the host OOM-kills
+      // us. Independent of the periodic browserRecycleMs so a
+      // fast leak gets caught quickly.
+      //
+      // Default 1500 MB is comfortable for a Pi 5 with 8 GB and
+      // the streamer container's typical 800–1200 MB working set.
+      // Set to 0 to disable.
+      memoryRecycleLimitMB: toInt(process.env.STREAM_MEMORY_RECYCLE_LIMIT_MB, 1500),
     },
   };
 }

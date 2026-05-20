@@ -181,6 +181,7 @@ class Streamer extends EventEmitter {
     this.error = null;
     this.startedAt = null;
     this.frameCount = 0;
+    this.framesDropped = 0;
     this.lastFrameAt = null;
 
     // Twitch ingest accept/reject signal. Flips to true when
@@ -232,6 +233,11 @@ class Streamer extends EventEmitter {
   // ---- Public API used by the HTTP layer -----------------------
 
   status() {
+    // v1.13.5: surface memory + framesDropped so the panel can
+    // alert on a degenerating stream BEFORE the host OOM-kills us.
+    // process.memoryUsage() is cheap (~5µs) and only called when
+    // /status is polled, which is once every 5 s.
+    const mem = process.memoryUsage();
     return {
       state: this.state,
       error: this.error,
@@ -240,7 +246,17 @@ class Streamer extends EventEmitter {
       sceneUrl: this.sceneUrl,
       overlays: this.overlays,
       frameCount: this.frameCount,
+      framesDropped: this.framesDropped,
       lastFrameAt: this.lastFrameAt,
+      memory: {
+        rssMB:       Math.round(mem.rss        / 1024 / 1024),
+        heapUsedMB:  Math.round(mem.heapUsed   / 1024 / 1024),
+        heapTotalMB: Math.round(mem.heapTotal  / 1024 / 1024),
+        externalMB:  Math.round(mem.external   / 1024 / 1024),
+      },
+      stdinBufferedKB: this.ffmpeg?.stdin?.writableLength
+        ? Math.round(this.ffmpeg.stdin.writableLength / 1024)
+        : 0,
       vod: this.vod
         ? { id: this.vod.id, name: this.vod.name, kind: this.vod.kind,
             startedAt: this.vodStartedAt, loop: !!this.vod.loop }
@@ -432,22 +448,41 @@ class Streamer extends EventEmitter {
 
     this.watchdogTimer = setInterval(() => {
       if (this.state !== "running") return;
+
+      // ── Frame-flow check ─────────────────────────────────────
       // No frames yet — startup grace period. _startScreencast()
       // has resolved but frames haven't started arriving; the FFmpeg
       // exit handler will trigger reconnect if this is fatal.
-      if (!this.lastFrameAt) return;
-      const idleMs = Date.now() - this.lastFrameAt;
-      if (idleMs > timeoutMs) {
-        this.logger.warn(
-          { idleMs, watchdogTimeoutMs: timeoutMs },
-          "watchdog: no screencast frames for too long, forcing reconnect",
-        );
-        // Stop polling — _scheduleReconnect → _teardown → next
-        // _runOnce will re-start it. If we DON'T stop here, the
-        // watchdog could fire again during teardown and queue a
-        // second reconnect.
-        this._stopWatchdog();
-        this._scheduleReconnect();
+      if (this.lastFrameAt) {
+        const idleMs = Date.now() - this.lastFrameAt;
+        if (idleMs > timeoutMs) {
+          this.logger.warn(
+            { idleMs, watchdogTimeoutMs: timeoutMs },
+            "watchdog: no screencast frames for too long, forcing reconnect",
+          );
+          this._stopWatchdog();
+          this._scheduleReconnect();
+          return;
+        }
+      }
+
+      // ── Memory-pressure check (v1.13.5) ──────────────────────
+      // If process RSS exceeds the configured limit, force a
+      // recycle BEFORE the host OOM-kills us. Independent of the
+      // periodic recycle so a fast leak doesn't have to wait the
+      // full browserRecycleMs window.
+      const limitMB = this.config.runtime.memoryRecycleLimitMB;
+      if (limitMB && limitMB > 0) {
+        const rssMB = Math.round(process.memoryUsage().rss / 1024 / 1024);
+        if (rssMB > limitMB) {
+          this.logger.warn(
+            { rssMB, limitMB },
+            "watchdog: memory pressure above limit, forcing recycle",
+          );
+          this._stopWatchdog();
+          this._scheduleReconnect();
+          return;
+        }
       }
     }, 5000);
   }
@@ -768,7 +803,12 @@ class Streamer extends EventEmitter {
     ];
 
     this.logger.debug({ url: safeUrl, codec: video.codec }, "spawning ffmpeg");
-    this.ffmpeg = spawn("ffmpeg", args, { stdio: ["pipe", "pipe", "pipe"] });
+    // stdio: stdin=pipe (we write MJPEG frames), stdout=ignore
+    // (FFmpeg writes nothing to stdout when output is an RTMP URL,
+    // but if it ever does the bytes accumulate forever with no
+    // consumer — was a real memory leak source pre-1.13.5),
+    // stderr=pipe (we parse for ingest-accept / error patterns).
+    this.ffmpeg = spawn("ffmpeg", args, { stdio: ["pipe", "ignore", "pipe"] });
     this.ingestAccepted = false;
 
     // Track signs that the hardware encoder isn't actually usable.
@@ -896,18 +936,44 @@ class Streamer extends EventEmitter {
       const stdin = ffmpeg.stdin;
       if (!stdin.writable) return;
 
+      // ── CRITICAL backpressure check (v1.13.5) ─────────────────
+      //
+      // The comment below the old code claimed "drop, don't queue"
+      // but the code unconditionally called `stdin.write(buf)`.
+      // When FFmpeg stalls (HW encoder hiccup, RTMP push lag,
+      // disk IO spike on the host) `stdin.write` returns false
+      // and Node buffers the unwritten bytes INTERNALLY. The OS
+      // pipe holds only ~64KB; everything beyond that lives in
+      // Writable._writableState.buffered as a chain of Buffers.
+      //
+      // At 30fps × ~100KB JPEG ≈ 3MB/s, a 30-second stall queues
+      // ~90MB. Over a 10h stream with intermittent stalls, that
+      // single fact has been observed to push the streamer
+      // container to 70-80% memory on a Pi 5.
+      //
+      // Fix: actually check the return value. If false, drop the
+      // frame entirely — a live stream values fresh frames over
+      // a queue of stale ones, and Twitch's encoder will fill
+      // the gap by repeating the previous frame in the broadcast.
+      //
+      // writableLength is in bytes; if there's already > 1 frame
+      // worth of data sitting in the buffer, we're behind — skip.
+      // The threshold is generous (256KB ≈ ~3 frames at our JPEG
+      // sizes) so transient OS-pipe-fill conditions don't drop
+      // frames unnecessarily.
+      const BACKPRESSURE_DROP_THRESHOLD = 256 * 1024;
+      if (stdin.writableLength > BACKPRESSURE_DROP_THRESHOLD) {
+        this.framesDropped = (this.framesDropped || 0) + 1;
+        return;
+      }
+
       const buf = Buffer.from(data, "base64");
       this.frameCount++;
       this.lastFrameAt = Date.now();
 
-      // Backpressure: drop, don't queue. A live stream prefers
-      // the newest frame over a stale buffered one.
-      //
-      // We intentionally don't attach a `drain` listener here —
-      // (a) we don't need to wait for it (we'd rather drop),
-      // (b) the no-op listener we used to attach accumulated under
-      //     sustained backpressure and tripped Node's
-      //     MaxListenersExceededWarning on the underlying Socket.
+      // If write returns false the chunk goes into Node's buffer
+      // but the next frame will see writableLength > threshold and
+      // drop. So this single buffered frame is bounded.
       stdin.write(buf);
     });
 
@@ -1108,7 +1174,9 @@ class Streamer extends EventEmitter {
 
     this.logger.info({ name: source.name, kind: source.kind, loop: !!source.loop },
                      "vod ffmpeg starting");
-    this.vodFfmpeg = spawn("ffmpeg", args, { stdio: ["ignore", "pipe", "pipe"] });
+    // stdout=ignore: VOD ffmpeg writes RTMP, not stdout — same
+    // memory-safety reasoning as the main streamer ffmpeg.
+    this.vodFfmpeg = spawn("ffmpeg", args, { stdio: ["ignore", "ignore", "pipe"] });
 
     const vodStreamKey = this.config.twitch.streamKey || "";
     const vodRedact = (s) => vodStreamKey ? s.split(vodStreamKey).join("***") : s;

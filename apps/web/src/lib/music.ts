@@ -383,7 +383,13 @@ class MusicEngine {
       ...AUDIO_FORMAT,
       "-y", MUSIC_FIFO,
     ];
-    const proc = spawn("ffmpeg", args, { stdio: ["ignore", "pipe", "pipe"] });
+    // v1.13.5: stdout=ignore. FFmpeg writes the PCM audio to
+    // the music FIFO (the `-y MUSIC_FIFO` output), not stdout.
+    // A previously-piped stdout had no `data` listener, so any
+    // setup-time bytes FFmpeg emitted accumulated forever in
+    // Node's stream buffer. stderr remains piped because we
+    // actively read it for error-pattern detection.
+    const proc = spawn("ffmpeg", args, { stdio: ["ignore", "ignore", "pipe"] });
     this.ffmpeg = proc;
     proc.stderr.on("data", (chunk) => {
       const line = chunk.toString().trim();
@@ -421,6 +427,16 @@ class MusicEngine {
     if (this.filler) return;
     this._ensureFifos();
     try {
+      // v1.13.5: stderr=ignore (was pipe).
+      //
+      // The previous setup piped stderr but never registered a
+      // `data` listener — meaning every byte FFmpeg emits sits
+      // in Node's internal pipe buffer forever. anullsrc at
+      // loglevel=error rarely says anything, but rare ≠ never;
+      // a long-running container with sporadic errors would
+      // slowly accumulate. ignore = the OS discards stderr
+      // without ever giving it to us, so there's nothing to
+      // accumulate.
       const proc = spawn("ffmpeg", [
         "-hide_banner", "-loglevel", "error", "-nostats",
         "-re",
@@ -428,7 +444,7 @@ class MusicEngine {
         "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
         ...AUDIO_FORMAT,
         "-y", SILENCE_FIFO,
-      ], { stdio: ["ignore", "ignore", "pipe"] });
+      ], { stdio: ["ignore", "ignore", "ignore"] });
       this.filler = proc;
       proc.on("exit", () => {
         this.filler = null;
@@ -457,6 +473,7 @@ class MusicEngine {
     if (this.musicFiller || this.musicFillerSuspended) return;
     this._ensureFifos();
     try {
+      // v1.13.5: stderr=ignore — same reasoning as silence filler.
       const proc = spawn("ffmpeg", [
         "-hide_banner", "-loglevel", "error", "-nostats",
         "-re",
@@ -464,7 +481,7 @@ class MusicEngine {
         "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
         ...AUDIO_FORMAT,
         "-y", MUSIC_FIFO,
-      ], { stdio: ["ignore", "ignore", "pipe"] });
+      ], { stdio: ["ignore", "ignore", "ignore"] });
       this.musicFiller = proc;
       proc.on("exit", () => {
         this.musicFiller = null;

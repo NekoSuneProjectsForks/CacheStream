@@ -23,7 +23,7 @@ overlays, scheduling, and a couple of chat-driven games.
 
 <br/>
 
-![version](https://img.shields.io/badge/version-1.6.0-00f0ff?style=for-the-badge)
+![version](https://img.shields.io/badge/version-1.13.5-00f0ff?style=for-the-badge)
 ![docker](https://img.shields.io/badge/docker-compose-2496ED?style=for-the-badge&logo=docker&logoColor=white)
 ![nextjs](https://img.shields.io/badge/Next.js-14-000?style=for-the-badge&logo=nextdotjs)
 ![twitch](https://img.shields.io/badge/Twitch-OAuth2-9146FF?style=for-the-badge&logo=twitch&logoColor=white)
@@ -70,10 +70,13 @@ overlays, scheduling, and a couple of chat-driven games.
 
 | | |
 |---|---|
-| 🎬 **Scenes are webpages** | Anything Chromium can render — Grafana dashboards, your own React app, a CodeMirror editor, a Notion page. Bundled scenes for Starting Soon / BRB / Ending / Offline / Music / Pet / Datacenter. |
-| 🛂 **OAuth2 login** | Twitch authorization-code flow, first-login-wins ownership, HMAC-signed cookies, auto-refresh. |
-| 💬 **Real chat** | Twitch IRC over WebSocket — read, write, custom command engine with cooldowns and templating, AutoMod rules (`delete` / `timeout` / `ban`). |
+| 🎬 **Scenes are webpages** | Anything Chromium can render — Grafana dashboards, your own React app, a CodeMirror editor, a Notion page. Bundled scenes for Starting Soon / BRB / Ending / Offline / Music / Pet / Datacenter / RTMP Ingest. |
+| 🛂 **OAuth2 login + invites** | Twitch authorization-code flow, first-login-wins ownership, HMAC-signed cookies, auto-refresh. Owner can invite moderators to drive the panel (`v1.13`). |
+| 💬 **Real chat** | Twitch chat over **Helix + EventSub** (`v1.8`) — read, write, custom command engine with cooldowns and live-stat variables (`{uptime}`, `{viewers}`, `{game}`, …), AutoMod rules (`delete` / `timeout` / `ban`). |
 | 🔔 **EventSub alerts** | Follows / subs / gifts / resubs / cheers / raids via WebSocket EventSub, with a drop-in popup widget. |
+| 🖼️ **Scene overlays** | Chat box, alerts ticker, Now Playing card, uptime/viewer badge — each toggleable per scene from the Branding tab (`v1.10`). |
+| 📡 **RTMP ingest** | Push from OBS (or any RTMP encoder) to CacheStream, render it as a scene, composite overlays on top, forward to Twitch. Multi-key support (`v1.11`). |
+| 🎞️ **Browser-source embeds + VOD reruns** | Drop Streamlabs/NightBot widgets into a sandboxed scene; rerun past Twitch broadcasts as scenes (`v1.11`). |
 | 🎨 **Studio mode** | Drag/resize overlays on a 1080p preview canvas, side-by-side with the live program feed. Take-to-program in one click. |
 | 🎵 **Music + radio** | Upload MP3/FLAC/OGG, parse tags + cover art, queue / loop / shuffle / volume. Or stream any Icecast/Shoutcast URL. Audio mixed via shared FIFO so changes never drop the video. |
 | 📼 **VOD broadcast** | Stream pre-recorded files or remote URLs through a separate FFmpeg pipeline. No Chromium round-trip → much lower CPU. |
@@ -81,46 +84,60 @@ overlays, scheduling, and a couple of chat-driven games.
 | 🎮 **Chat games** | Tamagotchi-style AI Pet + "Twitch Plays Datacenter" sim, both driven by chat commands. |
 | 🛞 **Scheduler** | Minute-resolution rotation across scenes + overlay sets, per-day-of-week. |
 | 🪪 **Branding** | Upload a logo, set a display name + tagline + accent colour. Threads through every scene + the landing page + the admin header. |
+| 📱 **Mobile control panel** | The admin UI tightens to a drawer + stacked layout under 700 px so you can switch scenes from your phone (`v1.13`). |
+| 🛡️ **Long-stream stability** | Frame-flow watchdog, periodic Chromium recycle, memory-pressure auto-recycle, bounded teardown. Multi-day streams stay healthy (`v1.13.3`–`v1.13.5`). |
+| 🔄 **One-click updates** | Panel "Update" button + host-side watcher pulls + rebuilds the latest release (`v1.9.3`). |
 | 📚 **Examples** | [`examples/`](examples/) ships drop-in scene + game templates so you can fork your own without learning the codebase first. |
 
 ---
 
 ## Quickstart
 
-> **Sixty seconds, two commands.** Once your `.env` is filled in and your
-> Cloudflare Tunnel is pointed at port `7788`.
+> **One command + a wizard.** Since `v1.7`, almost everything is
+> configured from a first-run setup wizard in the panel itself.
+> The only `.env` value you need before bringing it up is `PUBLIC_URL`.
 
 ```bash
 git clone https://github.com/cachenetworks/CacheStream.git
 cd CacheStream
 cp .env.example .env
-$EDITOR .env                                 # fill 6 vars (see below)
+$EDITOR .env                                 # set PUBLIC_URL (see below)
 docker compose up -d
 ```
 
-Then open `https://your-tunnel-hostname/admin` → **Login with Twitch**.
-First login claims permanent ownership. Click **Start stream** when ready.
+Then open `https://your-tunnel-hostname/` → the setup wizard walks
+you through Twitch dev-app credentials and login. First login
+claims permanent ownership. Click **Start stream** when ready.
 
-### The five required `.env` vars
+### The one required `.env` var
 
 | Var | What | Where to get it |
 |---|---|---|
-| `PUBLIC_URL` | Your Cloudflare-Tunnel hostname | <https://one.dash.cloudflare.com/> → Zero Trust → Networks → Tunnels |
-| `TWITCH_CLIENT_ID` | Twitch dev app client id | <https://dev.twitch.tv/console/apps> |
-| `TWITCH_CLIENT_SECRET` | Same dev app | Same place — click **New Secret** |
-| `SESSION_SECRET` | Random 96+ char string | `openssl rand -hex 48` |
-| `INTERNAL_API_TOKEN` | Shared bearer (web ↔ streamer) | `openssl rand -hex 32` |
+| `PUBLIC_URL` | Your Cloudflare-Tunnel hostname (or `http://localhost:7788` for local dev) | <https://one.dash.cloudflare.com/> → Zero Trust → Networks → Tunnels |
 
-When you create the Twitch dev app, set the **OAuth Redirect URL** to
-`<PUBLIC_URL>/api/auth/twitch/callback` — exact match, no trailing slash.
+When you create the Twitch dev app (the wizard prompts you to),
+set the **OAuth Redirect URL** to `<PUBLIC_URL>/api/auth/twitch/callback`
+— exact match, no trailing slash.
 
-**No stream key in `.env`.** v1.6.1 pulls the broadcaster's
-stream key directly from Twitch the first time you log in to the
-panel (via the `channel:read:stream_key` OAuth scope). Just log
-in, click **Start stream**.
+**No stream key, no client secret, no session secret in `.env`.**
+The wizard collects what it needs and stores it in SQLite; the
+broadcaster's stream key is pulled directly from Twitch via the
+`channel:read:stream_key` OAuth scope on every login.
 
-That's it. Everything else has sensible defaults, including the
-encoder profile which auto-tunes to your host.
+`INTERNAL_API_TOKEN` is auto-generated by the web container at
+first boot and shared with the streamer over a docker volume.
+`SESSION_SECRET` is auto-generated on first request.
+
+Everything else has sensible defaults, including the encoder
+profile which auto-tunes to your host.
+
+### Inviting moderators (v1.13)
+
+Owner can mint single-use invite links from the **Staff** tab in
+the panel. The invitee opens the URL, logs in with their own
+Twitch account, and gets a `MOD` badge in the panel header. Mods
+can drive everything except branding, stream-key rotation, host
+updates, and staff management.
 
 ### Or use the pre-built images (no build step)
 
@@ -329,7 +346,9 @@ to compose overlays on a draft and **Take → Program** in one click.
 
 ## Control panel features
 
-The panel has eleven tabs, each focused on one workflow.
+The panel has thirteen tabs, each focused on one workflow. Two
+(**Branding**, **Staff**) are owner-only; the other eleven are
+visible to both the owner and any invited moderator.
 
 ### Status
 Live stream state, scene URL, uptime, frame count, resolution, bitrate,
@@ -362,15 +381,19 @@ Edit Twitch broadcaster metadata via Helix: title, category (debounced
 search), tags, language. Shows live viewer count when broadcasting.
 
 ### Chat
-Long-lived Twitch IRC client over WebSocket. Live message feed via SSE.
-Composer to send as the broadcaster. Connection state badges for chat
-+ EventSub. If your token is missing scopes, one-click re-authorize link.
+Reads via EventSub `channel.chat.message` over WebSocket (Helix
+chat — replaced the old IRC client in `v1.8`). Sends via Helix
+`POST /chat/messages`. Live feed via SSE; composer to send as
+the broadcaster. Connection-state badges for chat + EventSub.
+If your token is missing scopes, one-click re-authorize link.
 
 ### Commands / AutoMod
 - **Custom commands** — trigger on first word of a message
   (with or without leading `!`). Per-trigger cooldowns, mod-only /
   sub-only flags. Response templating: `{user}`, `{channel}`,
-  `{arg1}`…`{args}`.
+  `{arg1}`…`{args}` plus live-stat variables `{uptime}`,
+  `{viewers}`, `{game}`, `{title}`, `{followers}` (`v1.12`) —
+  resolved against a 5s Helix snapshot cache.
 - **AutoMod rules** — `contains` / `startswith` / `regex` matching;
   actions `delete` / `timeout <s>` / `ban`. Uses the Twitch moderation API.
 
@@ -406,10 +429,31 @@ Live feed of EventSub notifications. Auto-subscribed on connect:
   power, coolant, uptime under cyberattacks. Chat commands:
   `!add-server` `!defend` `!cool` `!power+` `!invest` `!restart`.
 
-### Branding
-Display name, tagline, accent colour, logo upload (PNG/JPG/WEBP/SVG/GIF,
-≤4 MB). All flow into every scene's ribbon, the public landing page,
-and the admin header. Inline live preview before saving.
+### Sources (v1.11)
+External content you can use as scenes:
+- **Browser-source embeds** — Streamlabs alert boxes, NightBot
+  timers, donation tickers, any URL widget. Rendered in a
+  sandboxed iframe so the embed can't read panel cookies.
+- **Twitch VOD archive** — pulls your last 20 broadcasts via
+  Helix `GET /videos`; one click promotes a VOD to a "rerun"
+  scene that plays via the official Twitch embed player.
+- **Multi-key RTMP ingest** — additional keys alongside the
+  default. Push from OBS / phone / capture card simultaneously,
+  switch between them as scenes.
+
+### Branding (owner-only)
+Display name, tagline, accent colour with 8 quick-pick swatches
+(`v1.10`), logo upload (PNG/JPG/WEBP/SVG/GIF, ≤4 MB), and the
+**Scene overlays** toggle card (chat box, alerts ticker, Now
+Playing card, uptime badge — per-overlay enable + corner). All
+flow into every scene's ribbon, the public landing page, and
+the admin header. Inline live preview before saving.
+
+### Staff (owner-only, v1.13)
+Mint single-use moderator invite codes with optional expiry
+(1 h / 24 h / 7 d / 30 d / never). Copy the URL, share with the
+mod, revoke any time. Active moderator list with one-click
+revoke.
 
 ---
 
@@ -742,6 +786,31 @@ Found a security issue? See [SECURITY.md](SECURITY.md).
 
 ---
 
+## Long-stream operations (v1.13.3+)
+
+CacheStream is designed to stay healthy through multi-day
+broadcasts. Several safety nets ensure a single hiccup doesn't
+take down the stream and quietly fail to recover:
+
+| Knob | Default | What it does |
+|---|---|---|
+| `STREAM_WATCHDOG_TIMEOUT_SECONDS` | `30` | If `state=running` but no MJPEG frames have flowed to FFmpeg in this many seconds, force a reconnect. Catches TCP-idle drops on the RTMP push, dead CDP screencast sessions, and similar silent-death modes. `0` disables. |
+| `STREAM_BROWSER_RECYCLE_HOURS` | `6` | Proactively tear down + restart the Chromium + FFmpeg pipeline after this much healthy uptime. Defends against gradual Chromium memory bloat. `0` disables. |
+| `STREAM_MEMORY_RECYCLE_LIMIT_MB` | `1500` | If the streamer process RSS exceeds this many megabytes, force an immediate pipeline recycle. Catches fast leaks before the host OOM-kills the container. `0` disables. |
+| `STREAM_TEARDOWN_TIMEOUT_SECONDS` | `10` | Hard deadline for `_teardown()`. If `browser.close()` or anything else hangs past this, leftover processes get `SIGKILL`'d and the next reconnect cycle proceeds anyway. |
+
+The streamer's `/status` endpoint (polled by the panel every
+5 s) now reports `framesDropped`, `memory.rssMB`,
+`memory.heapUsedMB`, and `stdinBufferedKB` so you can see
+backpressure or leak buildup from the Status tab before it
+becomes a problem (`v1.13.5`).
+
+The web container exposes the same telemetry at
+`GET /api/system/diag` (owner / mod only) alongside live bus
+listener counts per topic.
+
+---
+
 ## Built with
 
 - [Next.js 14](https://nextjs.org/) (App Router, TypeScript, standalone output)
@@ -749,7 +818,9 @@ Found a security issue? See [SECURITY.md](SECURITY.md).
 - [FFmpeg](https://ffmpeg.org/) (H.264 encoding, RTMP push, music mixing)
 - [better-sqlite3](https://github.com/WiseLibs/better-sqlite3) (persistence)
 - [music-metadata](https://github.com/Borewit/music-metadata) (ID3/Vorbis/FLAC tags)
-- [ws](https://github.com/websockets/ws) (Twitch IRC + EventSub)
+- [ws](https://github.com/websockets/ws) (Twitch EventSub WebSocket)
+- [hls.js](https://github.com/video-dev/hls.js) (RTMP-ingest playback in headless Chromium)
+- [nginx-rtmp](https://github.com/arut/nginx-rtmp-module) (RTMP ingest + HLS transmux sidecar)
 - [pino](https://getpino.io/) (structured logging)
 
 No client-side React state management library, no UI kit, no Tailwind —
