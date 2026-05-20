@@ -156,6 +156,14 @@ class Datacenter {
   }
 
   private _onChat(msg: any): void {
+    // v1.13.4: defensive top-level try/catch — same reasoning as
+    // pet.ts. A throw here used to propagate up through
+    // EventEmitter and poison the chat bus for every subscriber.
+    try { this._onChatInner(msg); }
+    catch (err: any) { console.warn("[datacenter] _onChat error:", err?.stack || err); }
+  }
+
+  private _onChatInner(msg: any): void {
     if (msg?.type !== "msg") return;
     const text = String(msg.message || "").trim().toLowerCase();
     if (!text) return;

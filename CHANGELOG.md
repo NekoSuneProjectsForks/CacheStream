@@ -1,5 +1,45 @@
 # Changelog
 
+## 1.13.4
+
+Fixes the "chat games keep breaking" problem.
+
+### Root cause: EventEmitter stops dispatching on throw
+
+Node's EventEmitter has an awkward behaviour where a synchronous
+listener that throws stops the dispatch right there — later
+listeners on the same `emit()` never run, and the throw
+propagates up to the caller. With chat fanning out to multiple
+subscribers (pet game, datacenter game, panel SSE, AutoMod,
+command engine), any one of them having a bad message — a
+malformed payload, a stray DB lock, a missing row — would
+silently drop the message for everyone else.
+
+The symptom was games that "worked sometimes" but would stop
+responding to chat after a while. The fix is at the bus layer:
+
+  - `lib/bus.ts` now wraps every `subscribe()`'d handler in a
+    try/catch. A handler throw is logged (once per topic per
+    minute, throttled to avoid spam) but doesn't propagate to
+    `emit()`. Other subscribers always get their turn.
+  - The unsubscribe path uses a `WeakMap` to find the wrapped
+    handler back from the original reference, so existing
+    callers can still rely on `subscribe()` returning a working
+    `unsub` closure.
+
+### Belt-and-braces in the game handlers
+
+  - `pet._onChat` and `datacenter._onChat` now have a
+    defensive top-level try/catch each. Even with the bus-layer
+    wrap as the primary line of defence, a failing DB write
+    inside a game shouldn't leave the game state half-written —
+    a thrown DB error now logs cleanly instead of corrupting
+    the in-memory `state()` accumulator.
+  - Small `msg.name || msg.login || "viewer"` fallback in
+    pet mutation log entries — previously a notification-style
+    message with no name+login would render as
+    `"undefined: feed"` in the feed log.
+
 ## 1.13.3
 
 Long-stream stability — fixes the issue where the streamer

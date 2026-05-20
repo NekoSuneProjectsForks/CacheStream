@@ -137,43 +137,55 @@ class Pet {
   }
 
   private _onChat(msg: any): void {
-    if (msg?.type !== "msg") return;
-    const text = String(msg.message || "").trim().toLowerCase();
-    if (!text) return;
-    const head = (text.startsWith("!") ? text.slice(1) : text).split(/\s+/);
-    const cmd = head[0];
+    // v1.13.4: defensive top-level try/catch. Any throw from the
+    // command handling — bad msg shape, transient DB lock, JSON
+    // serialise failure on a stray mutation — used to propagate
+    // up through EventEmitter and break the chat dispatch for
+    // every other subscriber. Bus-layer wrap (lib/bus.ts) is the
+    // primary line of defence; this is belt-and-braces so a
+    // failure here also doesn't leave the pet in a half-written
+    // state.
+    try {
+      if (msg?.type !== "msg") return;
+      const text = String(msg.message || "").trim().toLowerCase();
+      if (!text) return;
+      const head = (text.startsWith("!") ? text.slice(1) : text).split(/\s+/);
+      const cmd = head[0];
 
-    const apply = (mut: Partial<Record<keyof PetState, number>>, kind: string, detail: string) => {
-      const cur = this.state();
-      const next = { ...cur };
-      for (const [k, v] of Object.entries(mut)) {
-        (next as any)[k] = clamp(((cur as any)[k] || 0) + (v as number));
+      const apply = (mut: Partial<Record<keyof PetState, number>>, kind: string, detail: string) => {
+        const cur = this.state();
+        const next = { ...cur };
+        for (const [k, v] of Object.entries(mut)) {
+          (next as any)[k] = clamp(((cur as any)[k] || 0) + (v as number));
+        }
+        const mutations = [
+          ...cur.mutations.slice(-30),
+          { at: Date.now(), kind, detail: `${msg.name || msg.login || "viewer"}: ${detail}` },
+        ];
+        getDb().prepare(
+          `UPDATE pet_state SET hunger=?, happiness=?, energy=?, intelligence=?, aggression=?, morality=?,
+                  last_action=?, last_actor=?, mutations_json=? WHERE id = 1`
+        ).run(
+          next.hunger, next.happiness, next.energy, next.intelligence, next.aggression, next.morality,
+          detail, msg.name || msg.login || null, JSON.stringify(mutations)
+        );
+        publish("pet", this.state());
+      };
+
+      switch (cmd) {
+        case "feed":   return apply({ hunger:   20, happiness:  5, morality: 1 }, "feed", "feed");
+        case "pet":
+        case "pat":    return apply({ happiness:  6, aggression: -1 },           "pet", "pet");
+        case "play":   return apply({ happiness:  8, energy:    -10, intelligence: 1 }, "play", "play");
+        case "teach":
+          if (!msg.isMod) return;
+          return apply({ intelligence: 3 }, "teach", `teach ${head.slice(1).join(" ").slice(0, 24)}`);
+        case "insult":
+        case "hit":    return apply({ aggression: 5, morality: -2, happiness: -8 }, "abuse", cmd);
+        case "sleep":  return apply({ energy:    25, happiness:  2 },              "sleep", "sleep");
       }
-      const mutations = [
-        ...cur.mutations.slice(-30),
-        { at: Date.now(), kind, detail: `${msg.name || msg.login}: ${detail}` },
-      ];
-      getDb().prepare(
-        `UPDATE pet_state SET hunger=?, happiness=?, energy=?, intelligence=?, aggression=?, morality=?,
-                last_action=?, last_actor=?, mutations_json=? WHERE id = 1`
-      ).run(
-        next.hunger, next.happiness, next.energy, next.intelligence, next.aggression, next.morality,
-        detail, msg.name || msg.login || null, JSON.stringify(mutations)
-      );
-      publish("pet", this.state());
-    };
-
-    switch (cmd) {
-      case "feed":   return apply({ hunger:   20, happiness:  5, morality: 1 }, "feed", "feed");
-      case "pet":
-      case "pat":    return apply({ happiness:  6, aggression: -1 },           "pet", "pet");
-      case "play":   return apply({ happiness:  8, energy:    -10, intelligence: 1 }, "play", "play");
-      case "teach":
-        if (!msg.isMod) return;
-        return apply({ intelligence: 3 }, "teach", `teach ${head.slice(1).join(" ").slice(0, 24)}`);
-      case "insult":
-      case "hit":    return apply({ aggression: 5, morality: -2, happiness: -8 }, "abuse", cmd);
-      case "sleep":  return apply({ energy:    25, happiness:  2 },              "sleep", "sleep");
+    } catch (err: any) {
+      console.warn("[pet] _onChat error:", err?.stack || err);
     }
   }
 }
