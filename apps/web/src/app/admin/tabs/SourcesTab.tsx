@@ -300,11 +300,42 @@ function VodsSection() {
 
 /* ---- 3. Multi-key RTMP ingest ----------------------------------- */
 
+/**
+ * v1.13.7 — proper secret-handling UX for stream keys.
+ *
+ * Stream keys are credentials: anyone who has one can publish to
+ * your CacheStream broadcast. Previously they were always
+ * visible in the panel as plain text, which is risky if you
+ * ever screen-share or stream the panel for a tutorial.
+ *
+ * New behaviour:
+ *   - Keys are masked (•••• + last 4 chars) by default.
+ *   - "Reveal" toggle exposes a key briefly; auto-hides after
+ *     REVEAL_HIDE_MS so a forgotten reveal can't sit on-screen.
+ *   - "Copy" puts the raw value on the clipboard without ever
+ *     revealing it in the DOM. This is the safe default action.
+ *   - On Add / Regenerate, the new key is shown ONCE in a
+ *     prominent banner — the operator copies it, then it's
+ *     masked like the others (still retrievable via Reveal,
+ *     but the banner is the only place it gets emphasised).
+ *   - Regenerate rotates a key in place: same row, same label,
+ *     new value. Invalidates any encoder using the old key.
+ *
+ * Masking is purely a display convenience — anyone with panel
+ * access (owner or mod) can still retrieve the raw value with
+ * Reveal or Copy. The real fix for cred-on-display-leak is
+ * having two-factor / shorter sessions / mod role, all of which
+ * already exist (v1.13.0).
+ */
+const REVEAL_HIDE_MS = 10_000;
+
 function MultiKeySection() {
   const [keys, setKeys] = useState<IngestKey[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [draftLabel, setDraftLabel] = useState("");
   const [pushUrl, setPushUrl] = useState<string>("");
+  const [revealed, setRevealed] = useState<Record<string, number>>({}); // key → hide deadline ms
+  const [newKey, setNewKey] = useState<{ key: string; label: string; reason: "added" | "regenerated"; oldKey?: string } | null>(null);
 
   const refresh = async () => {
     try {
@@ -337,28 +368,63 @@ function MultiKeySection() {
   };
   useEffect(() => { refresh(); const id = setInterval(refresh, 5000); return () => clearInterval(id); }, []);
 
+  // Tick to expire reveal countdowns. Keeps the visual state
+  // honest without needing a per-key timeout.
+  useEffect(() => {
+    if (Object.keys(revealed).length === 0) return;
+    const id = setInterval(() => {
+      const now = Date.now();
+      let changed = false;
+      const next: Record<string, number> = {};
+      for (const [k, deadline] of Object.entries(revealed)) {
+        if (deadline > now) next[k] = deadline;
+        else changed = true;
+      }
+      if (changed) setRevealed(next);
+    }, 500);
+    return () => clearInterval(id);
+  }, [revealed]);
+
   const add = async () => {
     if (!draftLabel.trim()) return;
     setError(null);
     try {
-      await apiJson("/api/ingest/keys", {
+      const created = await apiJson("/api/ingest/keys", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ label: draftLabel }),
-      });
+      }) as { key: string; label: string };
       setDraftLabel("");
+      setNewKey({ key: created.key, label: created.label, reason: "added" });
       await refresh();
     } catch (e: any) { setError(e.message); }
   };
 
   const remove = async (k: string) => {
     if (k === "cache") {
-      alert("The 'cache' key is the default fallback; it can't be deleted.");
+      alert("The 'cache' key is the default fallback; it can't be deleted. Use Regenerate to rotate it.");
       return;
     }
-    if (!confirm(`Delete key "${k}"?`)) return;
+    if (!confirm(`Delete this stream key? Any encoder using it will lose access.`)) return;
     await fetch(`/api/ingest/keys/${encodeURIComponent(k)}`, { method: "DELETE" });
     await refresh();
+  };
+
+  const regenerate = async (k: IngestKey) => {
+    if (!confirm(
+      `Rotate this stream key?\n\n` +
+      `The old value (${maskKey(k.key)}) will stop working immediately. ` +
+      `Any encoder currently publishing with it must be updated to the ` +
+      `new value before it can reconnect.`,
+    )) return;
+    setError(null);
+    try {
+      const res = await apiJson(`/api/ingest/keys/${encodeURIComponent(k.key)}/regenerate`, {
+        method: "POST",
+      }) as { oldKey: string; newKey: string; label: string };
+      setNewKey({ key: res.newKey, label: res.label, reason: "regenerated", oldKey: res.oldKey });
+      await refresh();
+    } catch (e: any) { setError(e.message); }
   };
 
   const addAsScene = async (k: IngestKey) => {
@@ -379,6 +445,19 @@ function MultiKeySection() {
     try { await navigator.clipboard.writeText(text); } catch {}
   };
 
+  const reveal = (key: string) => {
+    setRevealed((r) => ({ ...r, [key]: Date.now() + REVEAL_HIDE_MS }));
+  };
+  const hide = (key: string) => {
+    setRevealed((r) => {
+      const n = { ...r };
+      delete n[key];
+      return n;
+    });
+  };
+  const isRevealed = (key: string) => (revealed[key] || 0) > Date.now();
+  const revealSecondsLeft = (key: string) => Math.max(0, Math.ceil((revealed[key] - Date.now()) / 1000));
+
   return (
     <section className="card">
       <div className="card-head">
@@ -392,6 +471,12 @@ function MultiKeySection() {
         <strong> Stream Keys</strong> — the panel will show the live
         bitrate + publisher IP within a few seconds of you hitting Start
         Streaming.
+      </p>
+      <p className="hint" style={{ fontSize: 11, opacity: .7 }}>
+        🔒 Keys are masked by default. Use <strong>Copy</strong> to copy a
+        key into your clipboard without revealing it on-screen; use
+        <strong> Reveal</strong> (auto-hides after 10s) only when you need
+        to see the value, e.g. to type it on a phone.
       </p>
 
       {/* v1.13.6: prominently surface the push URL so operators don't
@@ -414,6 +499,18 @@ function MultiKeySection() {
         </div>
       )}
 
+      {/* New-key banner — only place a freshly-minted key is shown
+          in plain text on the page. After dismiss, the key is still
+          retrievable via Reveal, but the banner emphasis says
+          "save it now" to encourage operators to copy + paste. */}
+      {newKey && (
+        <NewKeyBanner
+          newKey={newKey}
+          onDismiss={() => setNewKey(null)}
+          onCopy={() => copy(newKey.key)}
+        />
+      )}
+
       <div className="row gap" style={{ marginBottom: 10 }}>
         <input className="input"
                placeholder="Label — e.g. Phone, Capture card"
@@ -425,29 +522,108 @@ function MultiKeySection() {
       {error && <div className="error">{error}</div>}
 
       <ul className="rows">
-        {keys.map((k) => (
-          <li key={k.key} className="row gap" style={{ alignItems: "center" }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontWeight: 700 }}>{k.label || k.key}</div>
-              <div className="muted mono" style={{ fontSize: 11 }}>key: {k.key}</div>
-              {k.live && (
-                <div className="muted" style={{ fontSize: 11, color: "#4ade80", marginTop: 2 }}>
-                  {k.bitrateKbps ? `${k.bitrateKbps} kbps` : "publishing"}
-                  {k.clientAddr ? ` · from ${k.clientAddr}` : ""}
+        {keys.map((k) => {
+          const shown = isRevealed(k.key);
+          return (
+            <li key={k.key} className="row gap" style={{ alignItems: "center" }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 700 }}>{k.label || "(no label)"}</div>
+                <div className="muted mono" style={{ fontSize: 11, display: "flex", alignItems: "center", gap: 6 }}>
+                  key:&nbsp;
+                  <span style={{ fontFamily: "monospace" }}>
+                    {shown ? k.key : maskKey(k.key)}
+                  </span>
+                  {shown && (
+                    <span style={{ fontSize: 9, color: "var(--text-mute)", letterSpacing: ".18em" }}>
+                      HIDES IN {revealSecondsLeft(k.key)}s
+                    </span>
+                  )}
                 </div>
-              )}
-            </div>
-            <button className="btn-ghost sm" onClick={() => copy(k.key)} title="Copy stream key">📋 key</button>
-            <span className={`badge ${k.live ? "badge-ok" : ""}`}>
-              {k.live ? "LIVE" : "idle"}
-            </span>
-            <button className="btn-ghost sm" onClick={() => addAsScene(k)}>Use as scene</button>
-            <button className="btn-ghost sm" onClick={() => remove(k.key)}>×</button>
-          </li>
-        ))}
+                {k.live && (
+                  <div className="muted" style={{ fontSize: 11, color: "#4ade80", marginTop: 2 }}>
+                    {k.bitrateKbps ? `${k.bitrateKbps} kbps` : "publishing"}
+                    {k.clientAddr ? ` · from ${k.clientAddr}` : ""}
+                  </div>
+                )}
+              </div>
+              <button className="btn-ghost sm" onClick={() => copy(k.key)} title="Copy stream key to clipboard">
+                Copy
+              </button>
+              <button className="btn-ghost sm"
+                      onClick={() => shown ? hide(k.key) : reveal(k.key)}
+                      title={shown ? "Hide key" : "Reveal key (auto-hides after 10s)"}>
+                {shown ? "Hide" : "Reveal"}
+              </button>
+              <span className={`badge ${k.live ? "badge-ok" : ""}`}>
+                {k.live ? "LIVE" : "idle"}
+              </span>
+              <button className="btn-ghost sm" onClick={() => addAsScene(k)}>Use as scene</button>
+              <button className="btn-ghost sm" onClick={() => regenerate(k)} title="Rotate to a new random value">
+                Rotate
+              </button>
+              <button className="btn-ghost sm" onClick={() => remove(k.key)} title="Delete this key">×</button>
+            </li>
+          );
+        })}
       </ul>
     </section>
   );
+}
+
+/**
+ * Last-chance banner shown above the keys list when a new key is
+ * created or an existing one is regenerated. Encourages the
+ * operator to copy + paste it into their encoder right now,
+ * while it's prominent. After dismiss the key reverts to the
+ * masked default like every other entry.
+ */
+function NewKeyBanner({
+  newKey, onCopy, onDismiss,
+}: {
+  newKey: { key: string; label: string; reason: "added" | "regenerated"; oldKey?: string };
+  onCopy: () => void;
+  onDismiss: () => void;
+}) {
+  return (
+    <div className="banner ok" style={{ marginBottom: 12, padding: "12px 14px" }}>
+      <div style={{ fontSize: 12, marginBottom: 6, fontWeight: 700, letterSpacing: ".15em", textTransform: "uppercase" }}>
+        {newKey.reason === "added" ? "Stream key created" : "Stream key rotated"}
+        <span style={{ marginLeft: 8, color: "var(--text-mute)", fontWeight: 400, letterSpacing: 0, textTransform: "none" }}>
+          — copy it now; it&apos;ll be masked once you dismiss this banner.
+        </span>
+      </div>
+      <div className="row gap" style={{ alignItems: "center" }}>
+        <code style={{
+          flex: 1, padding: "8px 10px", background: "rgba(0,0,0,.35)",
+          borderRadius: 3, fontFamily: "monospace", fontSize: 13,
+          overflowX: "auto", whiteSpace: "nowrap",
+        }}>
+          {newKey.key}
+        </code>
+        <button className="btn-primary sm" onClick={onCopy}>Copy</button>
+        <button className="btn-ghost sm" onClick={onDismiss}>Dismiss</button>
+      </div>
+      {newKey.reason === "regenerated" && newKey.oldKey && (
+        <div className="muted" style={{ marginTop: 8, fontSize: 11 }}>
+          Old value <code>{maskKey(newKey.oldKey)}</code> has been invalidated.
+          Update your encoder before reconnecting.
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Mask a key for display:
+ *   `abc123def4567890` → `••••••••••••7890`
+ * Keeps the last 4 characters as a recognisability hint so the
+ * operator can tell two masked keys apart at a glance. Anything
+ * shorter than 8 chars is fully masked.
+ */
+function maskKey(k: string): string {
+  if (!k) return "";
+  if (k.length < 8) return "•".repeat(k.length);
+  return "•".repeat(Math.max(8, k.length - 4)) + k.slice(-4);
 }
 
 /* ---- Helpers ---------------------------------------------------- */

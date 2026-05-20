@@ -1,5 +1,59 @@
 # Changelog
 
+## 1.13.7
+
+Proper secret-handling for RTMP stream keys in the panel.
+
+Stream keys are credentials — anyone who has one can publish to
+your CacheStream broadcast. Previously they were always rendered
+in plain text in the Sources tab, which is risky when:
+
+  - you screen-share the panel for a tutorial,
+  - you stream the panel itself as a scene,
+  - you have a moderator looking over your shoulder.
+
+### Masked by default, reveal on demand
+
+  - Stream keys now display as `••••••••••••<last4>` everywhere
+    in the multi-key card. The last 4 chars stay visible as a
+    recognisability hint so two masked keys can be told apart
+    at a glance.
+  - **Reveal** button exposes the full key briefly with a
+    visible countdown; auto-hides after 10 seconds so a
+    forgotten reveal can't sit on-screen.
+  - **Copy** puts the raw value on the clipboard without ever
+    rendering it in the DOM. This is the safe default action.
+
+### New-key banner
+
+When a key is created (Add) or rotated (Rotate), the new value
+is shown once in a prominent banner above the list with a Copy
+button. Once the banner is dismissed the key reverts to masked
+display like every other entry — still retrievable via Reveal,
+but no longer emphasised.
+
+### Rotate ("Regenerate") flow
+
+New per-row **Rotate** button calls
+`POST /api/ingest/keys/<key>/regenerate`. The server mints a
+fresh 24-char hex value, preserves the row's label, and
+invalidates the old value. The UI shows the new key in the
+banner so the operator can paste it into their encoder
+immediately.
+
+The default key (kv `ingest_stream_key`, typically `cache`)
+can be rotated this way too — the endpoint updates the kv slot
+in place.
+
+### Migration
+
+No data changes. Existing keys keep working with their existing
+values; they're just displayed masked from now on. After
+upgrading, you can rotate any key you suspect of having leaked
+without losing the corresponding scene preset (the preset URL
+still references the old key — you'll need to recreate the
+scene or edit its URL in the Scenes tab).
+
 ## 1.13.6
 
 RTMP ingest overhaul. Reports of "OBS connected but 0 frames at
