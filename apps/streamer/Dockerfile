@@ -10,7 +10,11 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
 # util-linux gives us setpriv, which the entrypoint uses to
-# drop from root → streamer after fixing volume permissions.
+# drop from root → streamer after fixing volume perms.
+# The Mesa DRI/EGL packages (libegl1, libgles2, libgl1-mesa-dri,
+# mesa-va-drivers) let in-container Chromium rasterise on the GPU
+# (Pi VideoCore / V3D via /dev/dri) when STREAM_CHROMIUM_GPU is on
+# — without them Chromium silently falls back to CPU SwiftShader.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       chromium \
       ffmpeg \
@@ -32,6 +36,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       libxfixes3 \
       libxrandr2 \
       libgbm1 \
+      libegl1 \
+      libgles2 \
+      libgl1-mesa-dri \
+      mesa-va-drivers \
       libpango-1.0-0 \
       libcairo2 \
       libasound2 \

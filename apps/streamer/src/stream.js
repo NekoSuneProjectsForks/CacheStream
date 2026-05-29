@@ -171,6 +171,38 @@ function buildVideoFilters(video) {
   return steps.length > 0 ? steps.join(",") : null;
 }
 
+/**
+ * Build the GPU-related Chromium flags.
+ *
+ * The screencast is paint-driven: Chromium only emits a frame when
+ * the compositor produces one. The legacy flag set forced
+ * `--disable-gpu` + `--disable-software-rasterizer`, which pins all
+ * compositing to SwiftShader (CPU GL). On a Pi that caps the page
+ * at ~3 painted fps for the animated scenes — a 3-fps slideshow.
+ *
+ * When `gpuEnabled` is true we let Chromium rasterise on the GPU
+ * instead (Pi VideoCore / V3D via Mesa EGL, or any host with a
+ * /dev/dri render node). `--disable-frame-rate-limit` lets the
+ * compositor produce frames as fast as the page repaints rather
+ * than clamping to the default cap.
+ *
+ * If GPU init fails at runtime Chromium falls back to software on
+ * its own; the worst case is the old behaviour, and the streamer's
+ * reconnect machinery covers an outright crash.
+ */
+function buildChromiumGpuArgs(gpuEnabled) {
+  if (!gpuEnabled) {
+    return ["--disable-gpu", "--disable-software-rasterizer"];
+  }
+  return [
+    "--ignore-gpu-blocklist",
+    "--enable-gpu-rasterization",
+    "--enable-zero-copy",
+    "--use-gl=egl",
+    "--disable-frame-rate-limit",
+  ];
+}
+
 class Streamer extends EventEmitter {
   constructor({ config, logger }) {
     super();
@@ -550,6 +582,9 @@ class Streamer extends EventEmitter {
         resolution: `${this.config.video.width}x${this.config.video.height}`,
         fps: this.config.video.fps,
         scene: this.sceneUrl,
+        gpu: this.config.video.gpuEnabled
+          ? `on (egl, mode=${this.config.video.gpuMode})`
+          : `off (software, mode=${this.config.video.gpuMode})`,
       },
       "streaming to twitch"
     );
@@ -570,9 +605,13 @@ class Streamer extends EventEmitter {
         "--no-sandbox",
         "--disable-setuid-sandbox",
         "--disable-dev-shm-usage",
-        "--disable-gpu",
+        // GPU flags are mode-dependent (STREAM_CHROMIUM_GPU). When
+        // off this re-adds --disable-gpu + --disable-software-
+        // rasterizer (legacy software path); when on it enables GPU
+        // rasterisation so the Pi compositor can keep up with the
+        // scene's paint rate instead of choking at ~3 fps.
+        ...buildChromiumGpuArgs(this.config.video.gpuEnabled),
         "--no-zygote",
-        "--disable-software-rasterizer",
         "--disable-background-timer-throttling",
         "--disable-backgrounding-occluded-windows",
         "--disable-renderer-backgrounding",

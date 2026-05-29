@@ -23,7 +23,7 @@ overlays, scheduling, and a couple of chat-driven games.
 
 <br/>
 
-![version](https://img.shields.io/badge/version-1.13.8-00f0ff?style=for-the-badge)
+![version](https://img.shields.io/badge/version-1.13.9-00f0ff?style=for-the-badge)
 ![docker](https://img.shields.io/badge/docker-compose-2496ED?style=for-the-badge&logo=docker&logoColor=white)
 ![nextjs](https://img.shields.io/badge/Next.js-14-000?style=for-the-badge&logo=nextdotjs)
 ![twitch](https://img.shields.io/badge/Twitch-OAuth2-9146FF?style=for-the-badge&logo=twitch&logoColor=white)
@@ -686,6 +686,15 @@ For finer-grained control beyond what the auto-profile picks.
 ### Capture
 - `STREAM_SCREENCAST_QUALITY=60` — drops JPEG quality on the
   Chromium → FFmpeg pipe. Visually identical after H.264.
+- `STREAM_CHROMIUM_GPU=auto` (default) — lets Chromium rasterise
+  scenes on the GPU instead of the CPU software compositor. The
+  screencast is paint-driven, so on a Pi the software path caps the
+  scene at **~3 fps** no matter the encoder settings. `auto` turns
+  the GPU on for a Pi (or any host with a `/dev/dri` render node);
+  you must pass `/dev/dri` into the streamer container — the Pi
+  overlay (`docker-compose.pi.yml`) now does this. Separate from the
+  HW encoder, so it also speeds up the Pi 5. Set `off` for the old
+  software path.
 
 ### Scene-side
 - Avoid `filter: blur(40px)`, full-screen `backdrop-filter`, or
@@ -744,6 +753,22 @@ nc -zv live.twitch.tv 1935
 Stale state cookie or `SESSION_SECRET` changed mid-flow. Restart the
 login. If persistent, the browser may be blocking third-party cookies
 on the Cloudflare hostname.
+
+### Pi scenes look choppy / stuck around 3 FPS
+The Chromium screencast only emits a frame when the page repaints,
+and the CPU software compositor on a Pi can't repaint the animated
+scenes faster than a few times a second — so the broadcast looks
+like a ~3-fps slideshow even though FFmpeg pads it to 30 fps CFR.
+Fix: let Chromium use the GPU.
+- Confirm `STREAM_CHROMIUM_GPU` is `auto` (default) or `on`.
+- Pass the GPU render node into the container. **Pi 4:**
+  `docker compose -f docker-compose.yml -f docker-compose.pi.yml up -d`
+  (the overlay now maps `/dev/dri` alongside the v4l2 encoder).
+  **Pi 5:** map just `/dev/dri` (see the Pi 5 note at the top of
+  `docker-compose.pi.yml`).
+- The streamer's boot log should show `gpu: on (egl, …)`.
+- Still avoid `backdrop-filter: blur`, full-screen `box-shadow`, and
+  giant blurs in custom scenes — they're expensive even on the GPU.
 
 ### Pi runs hot
 - Confirm the auto-profile picked `pi` and (if available) `h264_v4l2m2m`

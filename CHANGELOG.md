@@ -1,5 +1,47 @@
 # Changelog
 
+## 1.13.9
+
+GPU rasterisation for the headless Chromium scene renderer —
+fixes the "scenes are stuck at ~3 fps on a Raspberry Pi" problem.
+
+### Why scenes were choppy
+
+`Page.startScreencast` is paint-driven: Chromium only hands us a
+frame when its compositor produces one. The streamer hard-forced
+`--disable-gpu` **and** `--disable-software-rasterizer`, pinning
+all compositing to the CPU SwiftShader path. On a Pi, software-
+compositing the animated scenes (gradients, `backdrop-filter`
+blur, big `box-shadow`) at 720p saturates the CPU and the page
+only repaints ~3 times a second. FFmpeg dutifully padded that to
+30 fps CFR, so the broadcast *looked* like a 3-fps slideshow even
+though Twitch was receiving 30 fps.
+
+### `STREAM_CHROMIUM_GPU=auto|on|off`
+
+New knob (default `auto`). `auto` enables GPU rasterisation when
+the host is a Pi or exposes a `/dev/dri/renderD128` render node;
+`on`/`off` force it. When on, the launcher drops the two
+`--disable-*` flags and adds `--enable-gpu-rasterization`,
+`--ignore-gpu-blocklist`, `--enable-zero-copy`, `--use-gl=egl`,
+`--disable-frame-rate-limit`. GPU init failure falls back to
+software on its own, so the worst case is the old behaviour.
+
+This is unrelated to the `h264_v4l2m2m` hardware *encoder* (a
+separate block), so it also speeds up the **Pi 5**, which has a
+GPU for rendering but no fixed-function H.264 encoder.
+
+### Plumbing
+
+- The streamer image now ships the Mesa DRI/EGL userspace drivers
+  (`libegl1`, `libgles2`, `libgl1-mesa-dri`, `mesa-va-drivers`)
+  so in-container Chromium can actually reach the GPU.
+- `docker-compose.pi.yml` now maps `/dev/dri` and adds the
+  `render` supplementary group alongside the existing v4l2
+  encoder devices. Pi 5 guidance added for a `/dev/dri`-only
+  overlay.
+- The streamer's boot log reports the chosen GPU mode.
+
 ## 1.13.8
 
 Three log-noise fixes — `docker compose logs` was unreadable on
