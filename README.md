@@ -23,7 +23,7 @@ overlays, scheduling, and a couple of chat-driven games.
 
 <br/>
 
-![version](https://img.shields.io/badge/version-1.13.9-00f0ff?style=for-the-badge)
+![version](https://img.shields.io/badge/version-1.14.0-00f0ff?style=for-the-badge)
 ![docker](https://img.shields.io/badge/docker-compose-2496ED?style=for-the-badge&logo=docker&logoColor=white)
 ![nextjs](https://img.shields.io/badge/Next.js-14-000?style=for-the-badge&logo=nextdotjs)
 ![twitch](https://img.shields.io/badge/Twitch-OAuth2-9146FF?style=for-the-badge&logo=twitch&logoColor=white)
@@ -150,6 +150,25 @@ Pulls `ghcr.io/cachenetworks/cachestream-web` +
 (`amd64` + `arm64`) by GitHub Actions on every tag. Skips the
 ~5 minute first-time build.
 
+### Or run it as a desktop app (no Docker) — `v1.14`
+
+Prefer not to run Docker? CacheStream also ships as a native
+**desktop app** for **Linux** (x64 + arm64, including Raspberry Pi
+OS 64-bit) and **Windows** (x64 + arm64). One installer bundles
+everything — Chromium, FFmpeg, the panel, and the streamer — so
+there's nothing else to install.
+
+Grab the installer for your platform from the
+[Releases page](https://github.com/cachenetworks/CacheStream/releases)
+(`.AppImage` / `.deb` for Linux, NSIS installer / portable `.exe`
+for Windows), launch it, and the same control panel opens in its own
+window. Log in to Twitch, pick a scene, hit **Start**.
+
+It renders scenes through an offscreen **GPU-accelerated** window at a
+guaranteed frame rate, so the Pi's choppy-scene problem doesn't apply.
+Build it yourself from [`apps/desktop/`](apps/desktop/) — see that
+README for the dev + packaging flow.
+
 ---
 
 ## Architecture
@@ -230,10 +249,14 @@ CacheStream/
 │   │       ├── logger.js
 │   │       ├── stream.js        Puppeteer → FFmpeg → RTMP pipeline
 │   │       └── api.js           Internal HTTP control API
-│   └── web/                     Next.js 14 + TypeScript
-│       ├── Dockerfile           Multi-stage standalone build
-│       ├── entrypoint.sh        Drops root → nextjs after fixing volume perms
-│       └── src/                 see "Built with" below for the full tree
+│   ├── web/                     Next.js 14 + TypeScript
+│   │   ├── Dockerfile           Multi-stage standalone build
+│   │   ├── entrypoint.sh        Drops root → nextjs after fixing volume perms
+│   │   └── src/                 see "Built with" below for the full tree
+│   └── desktop/                 Electron desktop app (no Docker) — v1.14
+│       ├── src/                 main process, DesktopStreamer, audio relay
+│       ├── scripts/             vendor streamer src + build web bundle
+│       └── electron-builder.yml win/linux × x64/arm64 installers
 ├── examples/                    👈 Copy-paste templates for new scenes + games
 │   ├── README.md
 │   ├── scenes/
