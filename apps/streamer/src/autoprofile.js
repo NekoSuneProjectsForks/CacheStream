@@ -63,8 +63,15 @@ function detectHost() {
 
 function ffmpegEncoders() {
   try {
-    const out = execSync("ffmpeg -hide_banner -encoders 2>/dev/null", {
-      encoding: "utf8", timeout: 4000,
+    // FFMPEG_PATH lets the Electron desktop build point at its
+    // bundled static binary (there's no ffmpeg on PATH on Windows).
+    // In Docker it's unset and we fall back to the PATH `ffmpeg`.
+    // Quote the path so spaces in a Windows install dir survive the
+    // shell. `2>NUL`/`2>/dev/null` differ per-OS, so just drop the
+    // redirect and let stderr flow to our (ignored) parent stderr.
+    const bin = process.env.FFMPEG_PATH || "ffmpeg";
+    const out = execSync(`"${bin}" -hide_banner -encoders`, {
+      encoding: "utf8", timeout: 4000, stdio: ["ignore", "pipe", "ignore"],
     });
     return out;
   } catch {

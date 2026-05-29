@@ -1,5 +1,47 @@
 # Changelog
 
+## 1.14.0
+
+Native **desktop app** — CacheStream now runs without Docker on
+Linux (x64 + arm64, incl. Raspberry Pi) and Windows (x64 + arm64).
+
+### What it is
+
+A new `apps/desktop/` Electron app that bundles Chromium, a static
+FFmpeg, the panel, and the streamer into a single installer
+(AppImage / `.deb` / NSIS / portable `.exe`). Double-click, log in
+to Twitch, hit Start — nothing else to install.
+
+It reuses the existing pieces rather than forking them:
+
+- The unmodified Next.js panel (`apps/web`) runs as a child process
+  via Electron's `utilityProcess.fork`.
+- A new `DesktopStreamer` renders `/scene/*` through an **offscreen,
+  GPU-accelerated** `BrowserWindow` at a fixed `setFrameRate`, pipes
+  JPEG frames to the bundled FFmpeg, and exposes the **same**
+  `127.0.0.1` control API the panel already speaks (the streamer's
+  `api.js` is shared verbatim). Because Electron renders on the GPU,
+  the desktop app sidesteps the Pi software-compositor FPS problem
+  with no flags.
+- The H.264/AAC argv builders were extracted to
+  `apps/streamer/src/ffmpeg.js` and are shared by both backends.
+
+### Cross-platform audio
+
+The Linux build pipes music through named FIFOs (`mkfifo`), which
+don't exist on Windows. A new `AUDIO_TRANSPORT=fifo|tcp` switch
+(default `fifo` — Docker is byte-identical) lets the desktop app use
+`tcp` instead: the per-track music FFmpeg connects to a small
+loopback-TCP relay that supplies the always-on silent carrier, so
+the broadcast's audio input never drops between tracks. `autoprofile`
+and the music engine now also honour `FFMPEG_PATH` so the bundled
+binary is used when there's no `ffmpeg` on `PATH`.
+
+### CI
+
+`.github/workflows/desktop.yml` builds all four targets on matching
+native runners and attaches the installers to the tagged release.
+
 ## 1.13.9
 
 GPU rasterisation for the headless Chromium scene renderer —
