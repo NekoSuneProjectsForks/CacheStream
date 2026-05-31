@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.14.1
+
+Fixes for AMD64 Version
+
 ## 1.14.0
 
 Native **desktop app** — CacheStream now runs without Docker on
