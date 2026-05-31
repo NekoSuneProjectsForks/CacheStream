@@ -1,6 +1,8 @@
 "use strict";
 
 const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 
 /**
@@ -98,6 +100,7 @@ class Streamer extends EventEmitter {
     this.overlays = []; // [{ id, type:'text'|'html'|'image', ...payload }]
 
     this.browser = null;
+    this.browserProfileDir = null;
     this.page = null;
     this.client = null;
     this.ffmpeg = null;
@@ -462,16 +465,24 @@ class Streamer extends EventEmitter {
 
   async _launchBrowser() {
     const execPath = process.env.PUPPETEER_EXECUTABLE_PATH || "/usr/bin/chromium";
+    const runtimeDir = process.env.CHROMIUM_RUNTIME_DIR || path.join(os.tmpdir(), "cachestream-chromium");
+    const profileRoot = path.join(runtimeDir, "profiles");
+    const crashpadDir = path.join(runtimeDir, "crashpad");
+    fs.mkdirSync(profileRoot, { recursive: true });
+    fs.mkdirSync(crashpadDir, { recursive: true });
+    this.browserProfileDir = fs.mkdtempSync(path.join(profileRoot, "profile-"));
 
-    this.browser = await puppeteer.launch({
-      executablePath: execPath,
-      headless: "new",
-      defaultViewport: {
-        width: this.config.video.width,
-        height: this.config.video.height,
-        deviceScaleFactor: 1,
-      },
-      args: [
+    try {
+      this.browser = await puppeteer.launch({
+        executablePath: execPath,
+        headless: "new",
+        userDataDir: this.browserProfileDir,
+        defaultViewport: {
+          width: this.config.video.width,
+          height: this.config.video.height,
+          deviceScaleFactor: 1,
+        },
+        args: [
         "--no-sandbox",
         "--disable-setuid-sandbox",
         "--disable-dev-shm-usage",
@@ -514,13 +525,19 @@ class Streamer extends EventEmitter {
         "--disable-domain-reliability",
         "--disable-client-side-phishing-detection",
         "--disable-breakpad",
+        "--disable-crash-reporter",
+        `--crash-dumps-dir=${crashpadDir}`,
         "--metrics-recording-only",
         "--no-pings",
         "--password-store=basic",
         "--use-mock-keychain",
         `--window-size=${this.config.video.width},${this.config.video.height}`,
-      ],
-    });
+        ],
+      });
+    } catch (err) {
+      this._cleanupBrowserProfile();
+      throw err;
+    }
 
     this.browser.on("disconnected", () => {
       if (this.shouldRun && this.state !== "stopping") {
@@ -1136,7 +1153,6 @@ class Streamer extends EventEmitter {
    * is on a docker volume shared with the web container.
    */
   _ensureAudioFifos() {
-    const path = require("node:path");
     const fifos = [
       process.env.SILENCE_FIFO_PATH || "/app/audio/silence.fifo",
       process.env.MUSIC_FIFO_PATH   || "/app/audio/music.fifo",
@@ -1224,6 +1240,7 @@ class Streamer extends EventEmitter {
         try { proc?.kill?.("SIGKILL"); } catch {}
         this.browser = null;
       }
+      this._cleanupBrowserProfile();
     })();
 
     let timedOut = false;
@@ -1246,6 +1263,18 @@ class Streamer extends EventEmitter {
       try { this.page = null; } catch {}
       try { this.browser?.process?.()?.kill?.("SIGKILL"); } catch {}
       this.browser = null;
+      this._cleanupBrowserProfile();
+    }
+  }
+
+  _cleanupBrowserProfile() {
+    const dir = this.browserProfileDir;
+    this.browserProfileDir = null;
+    if (!dir) return;
+    try {
+      fs.rmSync(dir, { recursive: true, force: true });
+    } catch (err) {
+      this.logger.debug({ err, dir }, "chromium profile cleanup failed");
     }
   }
 }

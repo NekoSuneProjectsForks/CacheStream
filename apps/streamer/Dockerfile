@@ -7,7 +7,11 @@ FROM node:20-bookworm-slim
 ENV DEBIAN_FRONTEND=noninteractive \
     NODE_ENV=production \
     PUPPETEER_SKIP_DOWNLOAD=true \
-    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium \
+    HOME=/home/streamer \
+    XDG_CONFIG_HOME=/home/streamer/.config \
+    XDG_CACHE_HOME=/home/streamer/.cache \
+    CHROMIUM_RUNTIME_DIR=/tmp/cachestream-chromium
 
 # util-linux gives us setpriv, which the entrypoint uses to
 # drop from root → streamer after fixing volume perms.
@@ -59,7 +63,8 @@ RUN chmod +x /usr/local/bin/cachestream-entrypoint
 # We do NOT `USER streamer` here — the entrypoint runs as root
 # first to chown the audio volume, then drops privileges.
 RUN useradd --system --create-home --shell /usr/sbin/nologin streamer \
-    && chown -R streamer:streamer /app
+    && mkdir -p /home/streamer/.config /home/streamer/.cache /tmp/cachestream-chromium \
+    && chown -R streamer:streamer /app /home/streamer /tmp/cachestream-chromium
 
 ENTRYPOINT ["dumb-init", "--", "/usr/local/bin/cachestream-entrypoint"]
 CMD ["node", "src/index.js"]
