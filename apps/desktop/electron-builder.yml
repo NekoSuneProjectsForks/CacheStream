@@ -37,6 +37,7 @@ extraResources:
 
 linux:
   category: AudioVideo
+  maintainer: CacheNetworks <noreply@github.com>
   target:
     - target: AppImage
       arch: [x64, arm64]

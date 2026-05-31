@@ -12,7 +12,8 @@
 #     Electron's ABI for the target arch, which is far simpler
 #     native than cross-compiled.
 #
-# Triggers: tag push `v*`, or manual dispatch (artifacts only).
+# Triggers: tag push `v*`/numeric, or manual dispatch. Manual dispatch
+# uploads to a release when `version` is set, otherwise artifacts only.
 # =========================================================
 name: desktop
 
@@ -20,7 +21,13 @@ on:
   push:
     tags:
       - "v*"
+      - "[0-9]*"
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Optional release tag to upload installers to, for example 1.14.0 or v1.14.0"
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -72,11 +79,30 @@ jobs:
         working-directory: apps/desktop
         run: npm run ${{ matrix.script }}
 
+      - id: release_meta
+        name: Compute release target
+        shell: pwsh
+        env:
+          DISPATCH_VERSION: ${{ github.event.inputs.version }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          $tag = $env:DISPATCH_VERSION
+          if (-not $tag -and $env:REF_TYPE -eq "tag") {
+            $tag = $env:REF_NAME
+          }
+          if ($tag) {
+            "publish=true" >> $env:GITHUB_OUTPUT
+            "tag=$tag" >> $env:GITHUB_OUTPUT
+          } else {
+            "publish=false" >> $env:GITHUB_OUTPUT
+          }
+
       - name: Upload installers to release
-        if: github.ref_type == 'tag'
+        if: steps.release_meta.outputs.publish == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
+          tag_name: ${{ steps.release_meta.outputs.tag }}
           files: |
             apps/desktop/dist/*.AppImage
             apps/desktop/dist/*.deb
@@ -84,7 +110,7 @@ jobs:
           fail_on_unmatched_files: false
 
       - name: Upload installers as workflow artifacts
-        if: github.ref_type != 'tag'
+        if: steps.release_meta.outputs.publish != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: cachestream-${{ matrix.name }}
