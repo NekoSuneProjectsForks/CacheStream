@@ -31,10 +31,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: linux-x64,   os: ubuntu-latest,    script: "dist -- --linux --x64" }
-          - { name: linux-arm64, os: ubuntu-24.04-arm, script: "dist -- --linux --arm64" }
-          - { name: win-x64,     os: windows-latest,   script: "dist -- --win --x64" }
-          - { name: win-arm64,   os: windows-11-arm,   script: "dist -- --win --arm64" }
+          - { name: linux-x64,   os: ubuntu-latest,    script: "dist -- --linux --x64 --publish=never" }
+          - { name: linux-arm64, os: ubuntu-24.04-arm, script: "dist -- --linux --arm64 --publish=never" }
+          - { name: win-x64,     os: windows-latest,   script: "dist -- --win --x64 --publish=never" }
+          - { name: win-arm64,   os: windows-11-arm,   script: "dist -- --win --arm64 --publish=never" }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -70,8 +70,6 @@ jobs:
 
       - name: Build ${{ matrix.name }}
         working-directory: apps/desktop
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npm run ${{ matrix.script }}
 
       - name: Upload installers to release
