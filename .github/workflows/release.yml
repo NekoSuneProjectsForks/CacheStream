@@ -103,17 +103,29 @@ jobs:
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.licenses=MIT
 
+      - name: Summarize published image
+        run: |
+          echo "Published \`${{ steps.meta.outputs.tags }}\`" >> "$GITHUB_STEP_SUMMARY"
+
   release:
     needs: build
-    if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        if: github.ref_type == 'tag'
+
+      - name: Manual dispatch summary
+        if: github.ref_type != 'tag'
+        run: |
+          echo "Docker images were published by the build jobs." >> "$GITHUB_STEP_SUMMARY"
+          echo "GitHub Releases are created only from v* tag pushes." >> "$GITHUB_STEP_SUMMARY"
+
       # Create a GitHub Release for the tag with the body taken
       # from CHANGELOG.md (if a matching `## X.Y.Z` section exists).
       - name: Extract release notes from CHANGELOG
+        if: github.ref_type == 'tag'
         id: notes
         run: |
           VERSION="${GITHUB_REF#refs/tags/v}"
@@ -136,6 +148,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - uses: softprops/action-gh-release@v2
+        if: github.ref_type == 'tag'
         with:
           tag_name: ${{ github.ref_name }}
           name:     CacheStream ${{ steps.notes.outputs.version }}
