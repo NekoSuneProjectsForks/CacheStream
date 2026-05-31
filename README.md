@@ -142,13 +142,15 @@ updates, and staff management.
 ### Or use the pre-built images (no build step)
 
 ```bash
-docker compose --profile ghcr up -d
+docker compose -f docker-compose.yml -f docker-compose.ghcr.yml up -d
 ```
 
-Pulls `ghcr.io/cachenetworks/cachestream-web` +
-`ghcr.io/cachenetworks/cachestream-streamer`, built multi-arch
-(`amd64` + `arm64`) by GitHub Actions on every tag. Skips the
-~5 minute first-time build.
+Pulls `ghcr.io/nekosuneprojectsforks/cachestream-web`,
+`ghcr.io/nekosuneprojectsforks/cachestream-streamer`, and
+`ghcr.io/nekosuneprojectsforks/cachestream-ingest`, built multi-arch
+(`amd64` + `arm64`) by GitHub Actions. Set `CACHESTREAM_GHCR_OWNER`
+to another lowercase owner if you want images from a different fork.
+Skips the ~5 minute first-time build.
 
 ### Or run it as a desktop app (no Docker) — `v1.14`
 

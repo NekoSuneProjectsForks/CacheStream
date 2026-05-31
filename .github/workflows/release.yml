@@ -1,20 +1,21 @@
 # =========================================================
 # CacheStream release workflow
 # =========================================================
-# Builds multi-arch (amd64 + arm64) Docker images for both
-# apps and pushes them to GitHub Container Registry.
+# Builds multi-arch (amd64 + arm64) Docker images for all runtime
+# services and pushes them to GitHub Container Registry.
 #
 # Triggers:
 #   - tag push matching `v*` (e.g. v1.6.0)  → tagged + latest
-#   - workflow_dispatch (manual run)        → only `latest`
+#   - workflow_dispatch (manual run)        → manual-<sha> + latest
 #
 # Images:
 #   ghcr.io/<owner>/cachestream-web:<version> + :latest
 #   ghcr.io/<owner>/cachestream-streamer:<version> + :latest
+#   ghcr.io/<owner>/cachestream-ingest:<version> + :latest
 #
 # The Pi 4 / Pi 5 / other ARM users get arm64; everyone else
 # gets amd64 transparently via the multi-arch manifest. That's
-# what makes `docker compose --profile ghcr up` work for both.
+# what makes the GHCR compose overlay work for both.
 # =========================================================
 name: release
 

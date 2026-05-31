@@ -6,6 +6,11 @@
   "main": "src/main.js",
   "author": "CacheNetworks",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NekoSuneProjectsForks/CacheStream.git",
+    "directory": "apps/desktop"
+  },
   "scripts": {
     "sync-streamer": "node scripts/sync-streamer.mjs",
     "build-web": "node scripts/build-web.mjs",
@@ -22,9 +27,11 @@
     "node": ">=20.0.0"
   },
   "dependencies": {
-    "ffmpeg-static": "^5.2.0",
     "pino": "^9.5.0",
     "pino-pretty": "^11.2.2"
+  },
+  "optionalDependencies": {
+    "ffmpeg-static": "^5.2.0"
   },
   "devDependencies": {
     "@electron/rebuild": "^3.7.0",
