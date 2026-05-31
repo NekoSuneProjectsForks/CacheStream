@@ -757,7 +757,7 @@ class Streamer extends EventEmitter {
     // When we see any of these AND the current codec is not libx264,
     // we'll silently fall back on the next pipeline restart.
     let hwEncoderFailed = false;
-    const hwFailurePatterns = /v4l2|video11|h264_v4l2m2m|h264_nvenc|h264_qsv|cannot open codec|cannot open device|operation not permitted|no such device/i;
+    const hwFailurePatterns = /v4l2|video11|h264_v4l2m2m|h264_nvenc|h264_qsv|libcuda|cuda|nvenc|qsv|mfx|cannot open codec|cannot open device|error initializing output stream|operation not permitted|no such device/i;
 
     // ── Twitch ingest accept/reject signal ──────────────────────
     //

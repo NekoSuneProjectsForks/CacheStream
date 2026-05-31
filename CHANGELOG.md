@@ -1,8 +1,55 @@
 # Changelog
 
+## 1.14.2
+
+Desktop Linux ARM64 packaging and AMD64 Docker streaming fixes.
+
+### Desktop CI
+
+- Fixed the Linux ARM64 desktop workflow failing while building `.deb`
+  installers with `Exec format error`.
+- The ARM64 runner now installs and uses a native Ruby `fpm` instead
+  of electron-builder's bundled x86-only `fpm` binary.
+- Electron Builder target config now lets each matrix job build only
+  its requested architecture, preventing the ARM64 job from also
+  trying to package x64 Linux artifacts.
+
+### Docker streamer
+
+- AMD64 Docker servers now default to software `libx264` unless a
+  usable NVIDIA or Intel render device is visible inside the
+  container, preventing reconnect loops caused by FFmpeg selecting
+  unavailable hardware encoders.
+- Hardware encoder fallback detection now also catches CUDA, NVENC,
+  QSV, and Media SDK startup failures, so the streamer can recover to
+  software encoding instead of repeatedly failing to start.
+
+### Versions
+
+- Bumped the web, streamer, and desktop package versions to `1.14.2`.
+
 ## 1.14.1
 
-Fixes for AMD64 Version
+AMD64 Docker streamer stability fix.
+
+### Docker streamer
+
+- Fixed the AMD64 `cachestream-streamer` container failing to start
+  Chromium with `chrome_crashpad_handler: --database is required`.
+- The streamer image now gives Chromium a writable non-root
+  `HOME`, XDG config/cache directories, and a dedicated runtime
+  directory under `/tmp`.
+- Chromium now launches with an isolated temporary profile plus an
+  explicit crash dump directory, then cleans that profile up during
+  teardown/reconnect.
+- Crash reporting is disabled for the headless capture browser, which
+  avoids crashpad startup failures while keeping the existing
+  Puppeteer -> FFmpeg streaming pipeline unchanged.
+
+### Release notes
+
+This is primarily for x64/AMD64 Docker deployments using the GHCR or
+local Docker images. ARM64/Pi-specific compose behavior is unchanged.
 
 ## 1.14.0
 

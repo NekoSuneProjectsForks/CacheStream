@@ -39,18 +39,14 @@ linux:
   category: AudioVideo
   maintainer: CacheNetworks <noreply@github.com>
   target:
-    - target: AppImage
-      arch: [x64, arm64]
-    - target: deb
-      arch: [x64, arm64]
+    - AppImage
+    - deb
   artifactName: CacheStream-${version}-linux-${arch}.${ext}
 
 win:
   target:
-    - target: nsis
-      arch: [x64, arm64]
-    - target: portable
-      arch: [x64, arm64]
+    - nsis
+    - portable
   artifactName: CacheStream-${version}-win-${arch}.${ext}
 
 nsis:
