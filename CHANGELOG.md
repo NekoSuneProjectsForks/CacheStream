@@ -1,5 +1,48 @@
 # Changelog
 
+## 1.15.0
+
+Desktop app becomes a full standalone of all three Docker services, with
+LAN access and HTTPS-free Twitch login.
+
+### Desktop
+
+- **Embedded RTMP ingest.** The desktop app now runs its own RTMP→HLS
+  ingest server (node-media-server + the bundled FFmpeg), mirroring the
+  Docker `ingest` (nginx-rtmp) service's HTTP surface (`/hls`, `/stat`,
+  `/health`). Push from OBS / a phone / a capture card with no Docker —
+  the desktop build now bundles web + streamer + ingest.
+- **LAN access.** The panel and RTMP ingest bind to all interfaces, so
+  the mobile control panel and OBS can reach them from other devices.
+  The boot log and tray menu show the LAN panel + OBS push URLs.
+- **Twitch login without HTTPS.** The panel is served from
+  `http://localhost:<port>` (Twitch allows plain-http OAuth redirects for
+  `localhost`), so login works with no Cloudflare Tunnel or TLS. Register
+  `http://localhost:7788/api/auth/twitch/callback` as the dev-app
+  redirect URL.
+- **Self-healing setup.** Auto-downloads FFmpeg and the better-sqlite3
+  Electron prebuilt when missing, auto-builds the web bundle, and
+  verifies the native module's ABI before trusting it. `npm run dev`
+  recovers from a missing bundle or wrong-ABI native module on its own.
+
+### Web (Docker behaviour unchanged)
+
+- `INGEST_HTTP_URL` makes the ingest HTTP base configurable (default
+  `http://ingest:8080`).
+- `SCENE_BASE_URL` + scene/overlay URL normalisation let scene presets
+  work under both Docker (`web:7788`) and the desktop app
+  (`localhost`); existing presets are migrated and de-duplicated on boot.
+
+### Build pipeline
+
+- Windows builds handle spaces in the project path.
+- `electron-rebuild` is pinned to the Electron version and the native
+  module is verified to load before the build is accepted.
+
+### Versions
+
+- Bumped the web, streamer, and desktop package versions to `1.15.0`.
+
 ## 1.14.2
 
 Desktop Linux ARM64 packaging and AMD64 Docker streaming fixes.
