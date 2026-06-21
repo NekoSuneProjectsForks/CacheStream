@@ -36,9 +36,21 @@ services:
       # GPU render node (VideoCore VII / V3D). Lifts Chromium scene
       # rendering off the ~3 fps software path. This is the whole fix.
       - /dev/dri:/dev/dri
-    # Pi OS gates the render node behind the `render` group (and video
-    # devices behind `video`). The entrypoint starts as root and drops
-    # privileges with these supplementary groups intact.
+    # The render node is gated behind the host's `render` group, so the
+    # streamer's (non-root) process needs to be in that group.
+    #
+    # IMPORTANT: use the NUMERIC GID, not the name. Docker resolves a
+    # group NAME against the CONTAINER's /etc/group — which has no
+    # `render` group — so `group_add: [render]` errors with "group not
+    # found". A numeric GID is added directly with no lookup, so it
+    # always works. Find yours on the Pi host:
+    #
+    #     getent group render        # → render:x:993:   (993 = the GID)
+    #     ls -l /dev/dri/renderD128  # shows the owning group
+    #
+    # Then put YOUR GID below (993 is the common Pi OS Bookworm value;
+    # 44 is the usual `video` GID). If `getent group render` is empty,
+    # use the group `ls -l` shows (often `video`) instead.
     group_add:
-      - render
-      - video
+      - "993"   # render  ← change to your GID from `getent group render`
+      - "44"    # video
