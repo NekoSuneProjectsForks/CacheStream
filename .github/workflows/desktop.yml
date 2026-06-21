@@ -12,13 +12,17 @@
 #     Electron's ABI for the target arch, which is far simpler
 #     native than cross-compiled.
 #
-# Triggers: tag push `v*`/numeric, or manual dispatch. Manual dispatch
-# uploads to a release when `version` is set, otherwise artifacts only.
+# Triggers: tag push `v*`/numeric, a push to the `desktop` branch (CI
+# builds for desktop-only work), or manual dispatch. A tag/dispatch with
+# a version uploads installers to that GitHub Release; a `desktop`-branch
+# push just produces downloadable workflow artifacts.
 # =========================================================
 name: desktop
 
 on:
   push:
+    branches:
+      - desktop
     tags:
       - "v*"
       - "[0-9]*"

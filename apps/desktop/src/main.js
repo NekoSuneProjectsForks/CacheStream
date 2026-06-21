@@ -126,6 +126,9 @@ async function boot() {
   // ── Env the vendored streamer config (buildConfig) reads ───────
   process.env.INTERNAL_API_TOKEN = token;
   process.env.STREAMER_PORT = String(apiPort);
+  // Keep the internal control API on loopback — only the local web
+  // child calls it; no reason to expose it on the LAN.
+  process.env.STREAMER_BIND_HOST = "127.0.0.1";
   process.env.FFMPEG_PATH = ffmpegPath;
   process.env.DEFAULT_SCENE_URL = `${panelOrigin}/scene`;
   process.env.NODE_ENV = "production";

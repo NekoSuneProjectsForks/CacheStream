@@ -6,6 +6,8 @@
 #
 # Triggers:
 #   - tag push matching `v*` or `[0-9]*` -> tagged + latest + GitHub Release
+#   - push to the `docker` branch         -> manual-<sha> + latest images (CI
+#                                            for docker-only work, no Release)
 #   - workflow_dispatch without version   -> manual-<sha> + latest Docker images
 #   - workflow_dispatch with version      -> tagged + latest + GitHub Release
 #
@@ -22,6 +24,8 @@ name: release
 
 on:
   push:
+    branches:
+      - docker
     tags:
       - "v*"
       - "[0-9]*"

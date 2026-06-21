@@ -98,8 +98,8 @@ function createApi({ streamer, config, logger }) {
   return {
     listen() {
       return new Promise((resolve, reject) => {
-        server.listen(config.api.port, "0.0.0.0", () => {
-          logger.info({ port: config.api.port }, "streamer api listening");
+        server.listen(config.api.port, config.api.bindHost, () => {
+          logger.info({ port: config.api.port, host: config.api.bindHost }, "streamer api listening");
           resolve(server);
         });
         server.on("error", reject);

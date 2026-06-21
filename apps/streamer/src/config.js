@@ -106,6 +106,12 @@ function buildConfig({ logger } = {}) {
     api: {
       port: toInt(process.env.STREAMER_PORT, 7789),
       token: required("INTERNAL_API_TOKEN"),
+      // Bind host for the internal control API. Docker keeps 0.0.0.0
+      // so the separate web container can reach it over the compose
+      // network. The desktop app sets STREAMER_BIND_HOST=127.0.0.1 —
+      // there the only caller is the local web child, so we keep this
+      // token-gated API off the LAN entirely.
+      bindHost: process.env.STREAMER_BIND_HOST?.trim() || "0.0.0.0",
     },
     twitch: {
       streamKey: process.env.TWITCH_STREAM_KEY?.trim() || "",
