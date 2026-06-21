@@ -5,6 +5,16 @@ directories:
   output: dist
   buildResources: build
 
+# Where the in-app auto-updater (electron-updater) looks for new
+# versions, and what `electron-builder --publish` uploads alongside the
+# installers: the update metadata (latest.yml / latest-linux.yml) +
+# .blockmap files. The updater reads the latest GitHub Release here.
+publish:
+  provider: github
+  owner: NekoSuneProjectsForks
+  repo: CacheStream
+  releaseType: release
+
 # What goes inside the app bundle (the asar). The Electron main
 # process + its small dependency tree. The Next.js panel itself is
 # NOT in here — it ships as an unpacked extraResource (below) so its

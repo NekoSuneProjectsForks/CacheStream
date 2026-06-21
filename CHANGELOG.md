@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.17.0
+
+Desktop app auto-update.
+
+- The desktop app now **checks GitHub Releases for a newer version** on
+  launch (and every few hours). When one is found it shows a prompt —
+  **Install now** or **Remind me later**. "Install now" downloads the
+  update in the background, then offers to **Restart now** to apply it
+  (so it never interrupts a live stream without asking). Built on
+  `electron-updater`; only runs in the packaged app, not in dev.
+- electron-builder now publishes the update metadata (`latest*.yml` +
+  blockmaps) alongside the installers on tagged releases, which is what
+  the updater reads.
+
 ## 1.16.1
 
 Raspberry Pi 5 Docker FPS fix.

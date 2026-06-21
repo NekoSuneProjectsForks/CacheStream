@@ -42,10 +42,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: linux-x64,   os: ubuntu-latest,    script: "dist -- --linux --x64 --publish=never" }
-          - { name: linux-arm64, os: ubuntu-24.04-arm, script: "dist -- --linux --arm64 --publish=never" }
-          - { name: win-x64,     os: windows-latest,   script: "dist -- --win --x64 --publish=never" }
-          - { name: win-arm64,   os: windows-11-arm,   script: "dist -- --win --arm64 --publish=never" }
+          - { name: linux-x64,   os: ubuntu-latest,    flags: "--linux --x64" }
+          - { name: linux-arm64, os: ubuntu-24.04-arm, flags: "--linux --arm64" }
+          - { name: win-x64,     os: windows-latest,   flags: "--win --x64" }
+          - { name: win-arm64,   os: windows-11-arm,   flags: "--win --arm64" }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -89,42 +89,34 @@ jobs:
           Expand-Archive -Path $zip -DestinationPath "$env:RUNNER_TEMP\ff" -Force
           Copy-Item (Get-ChildItem -Recurse "$env:RUNNER_TEMP\ff\*\bin\ffmpeg.exe").FullName -Destination "$dst\ffmpeg.exe"
 
-      - name: Build ${{ matrix.name }}
-        working-directory: apps/desktop
-        run: npm run ${{ matrix.script }}
-
-      - id: release_meta
-        name: Compute release target
-        shell: pwsh
+      # Publish on a tag (or a dispatch with a version); otherwise just
+      # build. `--publish always` makes electron-builder upload the
+      # installers AND the update metadata (latest.yml / latest-linux.yml
+      # + .blockmap) the in-app auto-updater reads. GH_TOKEN authorises
+      # the upload to the GitHub Release.
+      - id: pub
+        name: Compute publish mode
+        shell: bash
         env:
           DISPATCH_VERSION: ${{ github.event.inputs.version }}
-          REF_TYPE: ${{ github.ref_type }}
-          REF_NAME: ${{ github.ref_name }}
         run: |
-          $tag = $env:DISPATCH_VERSION
-          if (-not $tag -and $env:REF_TYPE -eq "tag") {
-            $tag = $env:REF_NAME
-          }
-          if ($tag) {
-            "publish=true" >> $env:GITHUB_OUTPUT
-            "tag=$tag" >> $env:GITHUB_OUTPUT
-          } else {
-            "publish=false" >> $env:GITHUB_OUTPUT
-          }
+          if [[ -n "$DISPATCH_VERSION" || "${{ github.ref_type }}" == "tag" ]]; then
+            echo "mode=always" >> "$GITHUB_OUTPUT"
+          else
+            echo "mode=never" >> "$GITHUB_OUTPUT"
+          fi
 
-      - name: Upload installers to release
-        if: steps.release_meta.outputs.publish == 'true'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.release_meta.outputs.tag }}
-          files: |
-            apps/desktop/dist/*.AppImage
-            apps/desktop/dist/*.deb
-            apps/desktop/dist/*.exe
-          fail_on_unmatched_files: false
+      - name: Build ${{ matrix.name }}
+        working-directory: apps/desktop
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run dist -- ${{ matrix.flags }} --publish ${{ steps.pub.outputs.mode }}
 
+      # Branch / non-release builds: expose installers + update metadata
+      # as downloadable workflow artifacts (electron-builder didn't
+      # publish them to a Release).
       - name: Upload installers as workflow artifacts
-        if: steps.release_meta.outputs.publish != 'true'
+        if: steps.pub.outputs.mode != 'always'
         uses: actions/upload-artifact@v4
         with:
           name: cachestream-${{ matrix.name }}
@@ -132,4 +124,6 @@ jobs:
             apps/desktop/dist/*.AppImage
             apps/desktop/dist/*.deb
             apps/desktop/dist/*.exe
+            apps/desktop/dist/*.yml
+            apps/desktop/dist/*.blockmap
           if-no-files-found: ignore

@@ -45,6 +45,7 @@ const { AudioRelay } = require("./audio-relay");
 const { DesktopStreamer } = require("./desktop-streamer");
 const { IngestServer } = require("./ingest");
 const { ensureFfmpeg } = require("./ensure-ffmpeg");
+const { initUpdater } = require("./updater");
 const { createPanelWindow, createTray } = require("./window");
 
 // Vendored from apps/streamer/src (see scripts/sync-streamer.mjs).
@@ -220,6 +221,12 @@ async function boot() {
   // ── Window + tray ─────────────────────────────────────────────
   state.panelWindow = createPanelWindow(panelOrigin);
   attachLoginHandling(state.panelWindow, { panelOrigin, webPort, token, logger });
+  // Auto-update: check GitHub Releases and prompt (packaged app only).
+  initUpdater({
+    getWindow: () => state.panelWindow,
+    logger: logger.child({ module: "updater" }),
+  });
+
   state.tray = createTray({
     getWindow: () => state.panelWindow,
     onQuit: () => app.quit(),
