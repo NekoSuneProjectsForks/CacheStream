@@ -120,6 +120,18 @@ export const config = {
   },
   scene: {
     defaultUrl: optional("DEFAULT_SCENE_URL", `http://localhost:${port}/scene`),
+    // Base origin the STREAMER uses to reach this web app's scene +
+    // widget routes. It is NOT the operator's browser origin — it's
+    // whatever host the streamer can resolve:
+    //   Docker   — the compose service name `web:7788` (default,
+    //              unchanged from all prior releases).
+    //   Desktop  — http://localhost:<port>, since the in-process
+    //              streamer renders scenes over loopback (there is no
+    //              `web` host). The desktop app sets SCENE_BASE_URL.
+    // Stored scene/overlay URLs are normalised to this base when sent
+    // to the streamer (see toStreamerUrl in streamer-client.ts), so
+    // presets seeded with one base still work under the other.
+    baseUrl: optional("SCENE_BASE_URL", "http://web:7788").replace(/\/+$/, ""),
   },
   runtime: {
     dataDir: optional("DATA_DIR", "data"),
@@ -156,6 +168,19 @@ export const config = {
     // Compose mounts ./media/vods here from the host (read-write
     // on web, read-only on streamer).
     libraryDir: optional("VOD_LIBRARY_DIR", "/app/media/vods"),
+  },
+  ingest: {
+    // HTTP base of the RTMP-ingest sidecar's HLS + /stat surface.
+    //
+    //   Docker (default) — the nginx-rtmp service is reachable on the
+    //          compose network as `ingest:8080`. Unchanged from all
+    //          prior releases.
+    //   Desktop          — the Electron app runs its own embedded
+    //          RTMP→HLS server (node-media-server + bundled FFmpeg)
+    //          and points this at http://127.0.0.1:<port>. The server
+    //          mirrors nginx-rtmp's HTTP surface (/hls/*, /stat,
+    //          /health) so every route below works unchanged.
+    httpUrl: optional("INGEST_HTTP_URL", "http://ingest:8080").replace(/\/+$/, ""),
   },
 } as const;
 

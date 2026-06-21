@@ -17,7 +17,8 @@
   "scripts": {
     "sync-streamer": "node scripts/sync-streamer.mjs",
     "build-web": "node scripts/build-web.mjs",
-    "predev": "npm run sync-streamer",
+    "ensure-web": "node scripts/ensure-web.mjs",
+    "predev": "npm run sync-streamer && npm run ensure-web",
     "dev": "electron .",
     "rebuild": "electron-rebuild -f -w better-sqlite3 -m ../web",
     "prepack-app": "node scripts/sync-streamer.mjs && node scripts/build-web.mjs",
@@ -30,6 +31,7 @@
     "node": ">=20.0.0"
   },
   "dependencies": {
+    "node-media-server": "^2.7.0",
     "pino": "^9.5.0",
     "pino-pretty": "^11.2.2"
   },

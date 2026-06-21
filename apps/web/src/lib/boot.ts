@@ -18,6 +18,7 @@
  * games have subscribed to the bus, and scene presets are seeded.
  */
 
+import { config } from "./config";
 import { getStore } from "./store";
 import { startChat } from "./twitch/chat";
 import { startEventSub } from "./twitch/eventsub";
@@ -59,21 +60,73 @@ export function bootOnce(): void {
   // from before the operator logs in.
   const store = getStore();
   try {
-    const existing = new Set(store.listScenes().map((s) => s.url));
+    // Seed against the streamer-reachable base (config.scene.baseUrl):
+    // `http://web:7788` under Docker, `http://localhost:<port>` in the
+    // desktop app. Either way the activation path re-normalises the URL
+    // (toStreamerUrl), so a DB seeded under one still works under the
+    // other.
+    const base = config.scene.baseUrl;
+
+    // Hosts that mean "this web app". Presets pointing at any of these
+    // get migrated to the current base — so a DB seeded under Docker
+    // (`web:7788`) shows clean localhost URLs in the desktop app and
+    // vice-versa, instead of accumulating duplicates when the base
+    // changes between runs.
+    const selfHosts = new Set(["web", "localhost", "127.0.0.1", "0.0.0.0"]);
+    try { selfHosts.add(new URL(config.web.publicUrl).hostname); } catch { /* ignore */ }
+    const isSelf = (u: string): boolean => {
+      try { return selfHosts.has(new URL(u).hostname); } catch { return false; }
+    };
+    const pathOf = (u: string): string => {
+      try { const x = new URL(u); return x.pathname + x.search; } catch { return u; }
+    };
+    const rebase = (u: string): string => {
+      try {
+        const x = new URL(u);
+        if (!selfHosts.has(x.hostname)) return u;
+        const b = new URL(base);
+        x.protocol = b.protocol; x.hostname = b.hostname; x.port = b.port;
+        return x.toString();
+      } catch { return u; }
+    };
+
+    // 1. Migrate existing self-host presets to the current base, and
+    //    collapse the duplicates that creates. Foreign URLs (custom
+    //    external scenes) are never rewritten or removed.
+    const seenPaths = new Set<string>();
+    let migrated = 0, removedDups = 0;
+    for (const s of store.listScenes()) {
+      if (!isSelf(s.url)) continue;             // leave external presets alone
+      const rebased = rebase(s.url);
+      const p = pathOf(rebased);
+      if (seenPaths.has(p)) { store.removeScene(s.id); removedDups++; continue; }  // dedupe by path
+      if (rebased !== s.url) { store.updateSceneUrl(s.id, rebased); migrated++; }
+      seenPaths.add(p);
+    }
+    if (migrated > 0 || removedDups > 0) {
+      console.log(`[boot] scene presets: migrated ${migrated} to current base, removed ${removedDups} duplicate(s)`);
+    }
+
+    // 2. Seed any missing built-ins, deduped by path so a base change
+    //    never re-adds an existing scene.
     const builtins: Array<{ name: string; url: string }> = [
-      { name: "Hello World",   url: "http://web:7788/scene" },
-      { name: "Starting Soon", url: "http://web:7788/scene/starting-soon" },
-      { name: "BRB",           url: "http://web:7788/scene/brb" },
-      { name: "Ending",        url: "http://web:7788/scene/ending" },
-      { name: "Offline",       url: "http://web:7788/scene/offline" },
-      { name: "Music / Radio", url: "http://web:7788/scene/music" },
-      { name: "AI Pet",        url: "http://web:7788/scene/pet" },
-      { name: "Datacenter",    url: "http://web:7788/scene/datacenter" },
-      { name: "RTMP Ingest",   url: "http://web:7788/scene/ingest" },
+      { name: "Hello World",   url: `${base}/scene` },
+      { name: "Starting Soon", url: `${base}/scene/starting-soon` },
+      { name: "BRB",           url: `${base}/scene/brb` },
+      { name: "Ending",        url: `${base}/scene/ending` },
+      { name: "Offline",       url: `${base}/scene/offline` },
+      { name: "Music / Radio", url: `${base}/scene/music` },
+      { name: "AI Pet",        url: `${base}/scene/pet` },
+      { name: "Datacenter",    url: `${base}/scene/datacenter` },
+      { name: "RTMP Ingest",   url: `${base}/scene/ingest` },
     ];
     let added = 0;
     for (const b of builtins) {
-      if (!existing.has(b.url)) { store.addScene(b.name, b.url); added++; }
+      if (!seenPaths.has(pathOf(b.url))) {
+        store.addScene(b.name, b.url);
+        seenPaths.add(pathOf(b.url));
+        added++;
+      }
     }
     if (added > 0) console.log(`[boot] seeded ${added} built-in scene presets`);
   } catch (err) {

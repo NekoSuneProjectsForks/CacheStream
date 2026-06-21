@@ -157,14 +157,30 @@ Skips the ~5 minute first-time build.
 Prefer not to run Docker? CacheStream also ships as a native
 **desktop app** for **Linux** (x64 + arm64, including Raspberry Pi
 OS 64-bit) and **Windows** (x64 + arm64). One installer bundles
-everything — Chromium, FFmpeg, the panel, and the streamer — so
-there's nothing else to install.
+**all three Docker services** — Chromium, FFmpeg, the panel, the
+streamer, *and* the RTMP ingest — so there's nothing else to install.
 
 Grab the installer for your platform from the
 [Releases page](https://github.com/cachenetworks/CacheStream/releases)
 (`.AppImage` / `.deb` for Linux, NSIS installer / portable `.exe`
 for Windows), launch it, and the same control panel opens in its own
 window. Log in to Twitch, pick a scene, hit **Start**.
+
+Every panel feature works exactly as in the Docker build, including
+**RTMP ingest** — the app embeds an RTMP→HLS server (node-media-server
++ the bundled FFmpeg) in place of the nginx-rtmp container, so you can
+still push from OBS / a phone / a capture card and composite overlays
+on top. The panel and the ingest bind to your **LAN** (not just
+`127.0.0.1`): open the control panel from your phone at
+`http://<machine-ip>:7788/admin` and point OBS at
+`rtmp://<machine-ip>:1935/live`. The boot log + tray menu print the
+exact URLs.
+
+**Twitch login needs no HTTPS** in the desktop app — it serves the panel
+from `http://localhost:7788`, and Twitch allows plain http OAuth
+redirects for `localhost`. Just register
+`http://localhost:7788/api/auth/twitch/callback` as your dev-app redirect
+URL. No Cloudflare Tunnel or TLS required.
 
 It renders scenes through an offscreen **GPU-accelerated** window at a
 guaranteed frame rate, so the Pi's choppy-scene problem doesn't apply.
@@ -256,7 +272,8 @@ CacheStream/
 │   │   ├── entrypoint.sh        Drops root → nextjs after fixing volume perms
 │   │   └── src/                 see "Built with" below for the full tree
 │   └── desktop/                 Electron desktop app (no Docker) — v1.14
-│       ├── src/                 main process, DesktopStreamer, audio relay
+│       ├── src/                 main process, DesktopStreamer, audio relay,
+│       │                        embedded RTMP ingest (ingest.js)
 │       ├── scripts/             vendor streamer src + build web bundle
 │       └── electron-builder.yml win/linux × x64/arm64 installers
 ├── examples/                    👈 Copy-paste templates for new scenes + games

@@ -13,6 +13,48 @@
 
 import { config } from "./config";
 
+/**
+ * Normalise a URL that points at THIS web app to the base the streamer
+ * can actually reach (config.scene.baseUrl). Scene + widget URLs are
+ * stored with whatever base the panel/seed used (historically the
+ * Docker service name `http://web:7788`), but the streamer's reachable
+ * host differs between Docker (`web:7788`) and the desktop app
+ * (`localhost:<port>`). Rewriting here — the one server-side choke
+ * point for every scene/overlay URL — makes presets work under both
+ * without touching what's stored. External URLs (custom scenes, third-
+ * party embeds) have a foreign host and are left untouched.
+ */
+export function toStreamerUrl(raw: string): string {
+  if (!raw || typeof raw !== "string") return raw;
+  let u: URL;
+  try { u = new URL(raw); } catch { return raw; }
+
+  const selfHosts = new Set(["web", "localhost", "127.0.0.1", "0.0.0.0"]);
+  try { selfHosts.add(new URL(config.web.publicUrl).hostname); } catch { /* ignore */ }
+
+  if (!selfHosts.has(u.hostname)) return raw;
+
+  try {
+    const base = new URL(config.scene.baseUrl);
+    u.protocol = base.protocol;
+    u.hostname = base.hostname;
+    u.port = base.port;
+    return u.toString();
+  } catch {
+    return raw;
+  }
+}
+
+/** Rewrite any self-pointing `src` inside an overlay descriptor. */
+function normalizeOverlay(o: unknown): unknown {
+  if (!o || typeof o !== "object") return o;
+  const src = (o as { src?: unknown }).src;
+  if (typeof src === "string" && src) {
+    return { ...(o as object), src: toStreamerUrl(src) };
+  }
+  return o;
+}
+
 export interface StreamerStatus {
   state: "idle" | "starting" | "running" | "reconnecting" | "stopping";
   error: string | null;
@@ -95,9 +137,11 @@ export const streamer = {
   stop:     () => call<StreamerStatus>("POST", "/stop"),
   restart:  () => call<StreamerStatus>("POST", "/restart", undefined, 20_000),
   setScene: (url: string) =>
-    call<StreamerStatus>("POST", "/scene", { url }),
+    call<StreamerStatus>("POST", "/scene", { url: toStreamerUrl(url) }),
   setOverlays: (overlays: unknown[]) =>
-    call<StreamerStatus>("POST", "/overlays", { overlays }),
+    call<StreamerStatus>("POST", "/overlays", {
+      overlays: Array.isArray(overlays) ? overlays.map(normalizeOverlay) : overlays,
+    }),
   playVod:  (source: { id: string; name: string; kind: "file" | "url"; pathOrUrl: string; loop?: boolean }) =>
     call<StreamerStatus>("POST", "/vod/play", source),
   stopVod:  () => call<StreamerStatus>("POST", "/vod/stop"),

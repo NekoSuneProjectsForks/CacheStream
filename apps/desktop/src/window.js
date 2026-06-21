@@ -5,7 +5,7 @@
  * The window simply loads the locally-served Next.js panel.
  */
 
-const { BrowserWindow, Tray, Menu, shell, nativeImage } = require("electron");
+const { BrowserWindow, Tray, Menu, shell, nativeImage, clipboard } = require("electron");
 const path = require("node:path");
 
 function createPanelWindow(panelUrl) {
@@ -42,7 +42,14 @@ function createPanelWindow(panelUrl) {
   return win;
 }
 
-function createTray(getWindow, onQuit) {
+/**
+ * @param {object} opts
+ * @param {() => BrowserWindow|null} opts.getWindow
+ * @param {() => void} opts.onQuit
+ * @param {string|null} [opts.lanPanelUrl]  e.g. http://192.168.1.20:7788
+ * @param {string|null} [opts.rtmpPushUrl]  e.g. rtmp://192.168.1.20:1935/live
+ */
+function createTray({ getWindow, onQuit, lanPanelUrl = null, rtmpPushUrl = null }) {
   try {
     const iconPath = path.join(__dirname, "..", "build", "icon.png");
     const img = nativeImage.createFromPath(iconPath);
@@ -52,11 +59,33 @@ function createTray(getWindow, onQuit) {
 
     const tray = new Tray(img);
     tray.setToolTip("CacheStream");
-    tray.setContextMenu(Menu.buildFromTemplate([
+
+    const template = [
       { label: "Open CacheStream", click: () => { const w = getWindow(); if (w) { w.show(); w.focus(); } } },
-      { type: "separator" },
-      { label: "Quit", click: () => onQuit() },
-    ]));
+    ];
+    // LAN reachability — so you can open the panel from your phone or
+    // point OBS at the ingest without hunting for the machine's IP.
+    if (lanPanelUrl || rtmpPushUrl) {
+      template.push({ type: "separator" });
+      if (lanPanelUrl) {
+        template.push({
+          label: `Panel on LAN: ${lanPanelUrl}`,
+          click: () => clipboard.writeText(`${lanPanelUrl}/admin`),
+          toolTip: "Copy the LAN panel URL",
+        });
+      }
+      if (rtmpPushUrl) {
+        template.push({
+          label: `OBS push URL: ${rtmpPushUrl}`,
+          click: () => clipboard.writeText(rtmpPushUrl),
+          toolTip: "Copy the RTMP ingest URL for OBS",
+        });
+      }
+    }
+    template.push({ type: "separator" });
+    template.push({ label: "Quit", click: () => onQuit() });
+
+    tray.setContextMenu(Menu.buildFromTemplate(template));
     tray.on("click", () => { const w = getWindow(); if (w) { w.show(); w.focus(); } });
     return tray;
   } catch {

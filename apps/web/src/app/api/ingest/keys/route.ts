@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import crypto from "node:crypto";
 import { ownerRoute, readJson } from "@/lib/api-helpers";
 import { kvGet, kvSet } from "@/lib/db";
+import { config } from "@/lib/config";
 
 export const dynamic = "force-dynamic";
 
@@ -53,7 +54,7 @@ function listAllKeys(): IngestKeyRow[] {
 
 async function checkLive(key: string): Promise<boolean> {
   try {
-    const r = await fetch(`http://ingest:8080/hls/${encodeURIComponent(key)}.m3u8`,
+    const r = await fetch(`${config.ingest.httpUrl}/hls/${encodeURIComponent(key)}.m3u8`,
       { method: "HEAD", cache: "no-store" });
     return r.ok;
   } catch { return false; }

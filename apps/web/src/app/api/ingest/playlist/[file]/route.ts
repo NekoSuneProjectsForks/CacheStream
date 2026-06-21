@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { config } from "@/lib/config";
 
 export const dynamic = "force-dynamic";
 
@@ -21,7 +22,7 @@ export async function GET(_: Request, { params }: { params: { file: string } }) 
   if (!/^[A-Za-z0-9_\-.]+\.(m3u8|ts)$/.test(file)) {
     return new NextResponse("bad path", { status: 400 });
   }
-  const upstream = `http://ingest:8080/hls/${file}`;
+  const upstream = `${config.ingest.httpUrl}/hls/${file}`;
   const r = await fetch(upstream, { cache: "no-store" });
   if (!r.ok) return new NextResponse("upstream " + r.status, { status: r.status });
   const ct = file.endsWith(".m3u8")

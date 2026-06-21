@@ -15,6 +15,7 @@ import { existsSync, rmSync, mkdirSync, cpSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
+import { rebuildSqlite } from "./native.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const desktopDir = join(here, "..");
@@ -22,11 +23,19 @@ const webDir = join(desktopDir, "..", "web");
 const stage = join(desktopDir, "build", "web");
 
 const npm = process.platform === "win32" ? "npm.cmd" : "npm";
-const npx = process.platform === "win32" ? "npx.cmd" : "npx";
 
 function run(cmd, args, cwd) {
   console.log(`[build-web] ${cmd} ${args.join(" ")}  (cwd=${cwd})`);
-  const r = spawnSync(cmd, args, { cwd, stdio: "inherit", shell: process.platform === "win32" });
+  const useShell = process.platform === "win32";
+  // Under shell:true (needed to run .cmd shims on Windows) Node joins
+  // the args into one command string WITHOUT quoting — so any arg with
+  // a space, like a project path under "…\Forked Projects\…", gets
+  // split and the next command receives a truncated path. Quote args
+  // that need it so paths with spaces survive.
+  const safeArgs = useShell
+    ? args.map((a) => (/[\s"]/.test(a) ? `"${String(a).replace(/"/g, '\\"')}"` : a))
+    : args;
+  const r = spawnSync(cmd, safeArgs, { cwd, stdio: "inherit", shell: useShell });
   if (r.status !== 0) {
     console.error(`[build-web] command failed: ${cmd} ${args.join(" ")}`);
     process.exit(r.status ?? 1);
@@ -57,7 +66,9 @@ if (existsSync(join(webDir, "public"))) {
 }
 console.log("[build-web] staged web standalone → build/web");
 
-// 4. Rebuild the staged better-sqlite3 against Electron's ABI.
-//    -m points electron-rebuild at the module root holding node_modules.
-run(npx, ["electron-rebuild", "-m", stage, "-w", "better-sqlite3", "-f"], desktopDir);
+// 4. Rebuild the staged better-sqlite3 against Electron's ABI and
+//    stamp the version marker (see scripts/native.mjs). Without this
+//    the module stays built for the system Node and the panel crashes
+//    at boot with NODE_MODULE_VERSION mismatch.
+await rebuildSqlite(desktopDir, stage);
 console.log("[build-web] done");

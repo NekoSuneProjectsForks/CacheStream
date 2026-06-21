@@ -540,6 +540,11 @@ class Store {
     return r.changes > 0;
   }
 
+  updateSceneUrl(id: string, url: string): boolean {
+    const r = this.db.prepare("UPDATE scenes SET url = ? WHERE id = ?").run(url.trim(), id);
+    return r.changes > 0;
+  }
+
   getScene(id: string): ScenePreset | null {
     const r = this.db.prepare("SELECT * FROM scenes WHERE id = ?").get(id) as any;
     return r ? { id: r.id, name: r.name, url: r.url, createdAt: r.created_at } : null;

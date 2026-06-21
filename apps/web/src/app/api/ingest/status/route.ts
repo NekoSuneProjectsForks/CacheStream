@@ -54,7 +54,7 @@ export async function GET(req: NextRequest) {
     // rtmp build without stat support).
     let statReachable = false;
     try {
-      const r = await fetch("http://ingest:8080/stat", { cache: "no-store" });
+      const r = await fetch(`${config.ingest.httpUrl}/stat`, { cache: "no-store" });
       if (r.ok) {
         statReachable = true;
         const xml = await r.text();
@@ -78,7 +78,7 @@ export async function GET(req: NextRequest) {
     if (!statReachable && !live) {
       try {
         const r = await fetch(
-          `http://ingest:8080/hls/${encodeURIComponent(key)}.m3u8`,
+          `${config.ingest.httpUrl}/hls/${encodeURIComponent(key)}.m3u8`,
           { method: "HEAD", cache: "no-store" },
         );
         live = r.ok;
