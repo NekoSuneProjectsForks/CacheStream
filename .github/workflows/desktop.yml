@@ -112,6 +112,24 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npm run dist -- ${{ matrix.flags }} --publish ${{ steps.pub.outputs.mode }}
 
+      # Put this version's CHANGELOG section into the GitHub Release body
+      # so the in-app updater can render it as the "what's new" notes.
+      # Runs once (linux-x64) after electron-builder created the release.
+      - name: Set release notes from CHANGELOG
+        if: steps.pub.outputs.mode == 'always' && matrix.name == 'linux-x64'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          [[ -z "$VERSION" ]] && VERSION="${GITHUB_REF_NAME}"
+          VERSION="${VERSION#v}"
+          awk -v v="$VERSION" '$0 ~ "^## "v"($| )" {p=1;next} p && /^## [0-9]/ {exit} p {print}' CHANGELOG.md > "$RUNNER_TEMP/notes.md" || true
+          [[ -s "$RUNNER_TEMP/notes.md" ]] || echo "See the changelog for details." > "$RUNNER_TEMP/notes.md"
+          gh release edit "v${VERSION}" --notes-file "$RUNNER_TEMP/notes.md" \
+            || gh release edit "${VERSION}" --notes-file "$RUNNER_TEMP/notes.md" \
+            || echo "Could not set release notes (release not found yet)."
+
       # Branch / non-release builds: expose installers + update metadata
       # as downloadable workflow artifacts (electron-builder didn't
       # publish them to a Release).
