@@ -35,6 +35,17 @@ overlays, scheduling, and a couple of chat-driven games.
 
 ---
 
+> **📦 Where's the code?** This `main` branch is the project overview.
+> The source lives on two build branches:
+>
+> - [**`docker`**](../../tree/docker) — the Docker stack (web + streamer + ingest). `git clone -b docker …`, then `docker compose up -d`.
+> - [**`desktop`**](../../tree/desktop) — the native Electron desktop app (no Docker). Installers build from this branch.
+> - [**`main-backup`**](../../tree/main-backup) — full combined snapshot (archive).
+>
+> The instructions below reference files that live on those branches — check out the matching branch first.
+
+---
+
 ## What it does
 
 ```
