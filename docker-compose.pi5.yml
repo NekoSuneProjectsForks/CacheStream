@@ -52,5 +52,7 @@ services:
     # 44 is the usual `video` GID). If `getent group render` is empty,
     # use the group `ls -l` shows (often `video`) instead.
     group_add:
-      - "993"   # render  ← change to your GID from `getent group render`
-      - "44"    # video
+      # render group GID that owns /dev/dri/renderD128. Verify yours
+      # with `getent group render` — it varies between Pi OS installs
+      # (105 here; 993 and others are also seen).
+      - "105"   # render  ← change to your GID from `getent group render`
