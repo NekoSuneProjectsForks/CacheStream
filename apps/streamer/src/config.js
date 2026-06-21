@@ -138,8 +138,12 @@ function buildConfig({ logger } = {}) {
       // Chromium GPU rasterisation. `gpuMode` is the raw env choice
       // (auto|on|off); `gpuEnabled` is the resolved boolean the
       // browser launcher acts on (see stream.js buildChromiumGpuArgs).
+      // `gpuRenderNode` is whether /dev/dri/renderD128 is actually
+      // visible in the container — GPU can't really work without it, so
+      // stream.js warns when gpuEnabled is true but this is false.
       gpuMode,
       gpuEnabled,
+      gpuRenderNode: hasRenderNode,
     },
     audio: {
       bitrateKbps: pickInt("STREAM_AUDIO_BITRATE", "audioBitrateKbps", 128),

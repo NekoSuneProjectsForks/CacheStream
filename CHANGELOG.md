@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.16.1
+
+Raspberry Pi 5 Docker FPS fix.
+
+- **Added `docker-compose.pi5.yml`** — a Pi 5 overlay that maps only the
+  GPU render node (`/dev/dri`) into the streamer. The Pi 5 has no v4l2
+  H.264 encoder, so the Pi 4 overlay's `/dev/video*` devices error out;
+  this one fixes the choppy ~3-fps scenes (Chromium rasterises on the
+  V3D GPU instead of the software compositor) without that problem.
+  Run: `docker compose -f docker-compose.yml -f docker-compose.pi5.yml up -d`.
+- The streamer now **warns at boot** when GPU rasterisation is enabled
+  (e.g. auto-detected a Pi) but no `/dev/dri` render node is actually
+  visible in the container — the common cause of a `gpu: on` log yet a
+  3-fps stream.
+
 ## 1.16.0
 
 Desktop streaming overhaul: GPU encoding, smooth video + audio, music

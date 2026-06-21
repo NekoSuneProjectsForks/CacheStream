@@ -10,17 +10,13 @@
 #   export COMPOSE_FILE=docker-compose.yml:docker-compose.pi.yml
 #   docker compose up -d
 #
-# Pi 5 users:
-#   The BCM2712 has NO fixed-function H.264 encoder, so do NOT
-#   map the /dev/video* encoder devices below (they don't exist
-#   and Docker errors out). The streamer auto-detects Pi 5 and
-#   applies a tuned libx264 profile (720p30 veryfast) for you.
-#   BUT the Pi 5 DOES have a GPU for rendering — to fix choppy
-#   ~3-fps scenes you still want the /dev/dri render node. Easiest:
-#   create a tiny docker-compose.pi5.yml with just the streamer
-#   `devices: [/dev/dri:/dev/dri]` + `group_add: [render]` blocks
-#   from below (drop the /dev/video* lines), and run
-#   `docker compose -f docker-compose.yml -f docker-compose.pi5.yml up -d`.
+# Pi 5 users: DON'T use this file — use docker-compose.pi5.yml.
+#   The BCM2712 has NO fixed-function H.264 encoder, so the /dev/video*
+#   encoder devices below don't exist and Docker errors out. The Pi 5
+#   DOES have a GPU for rendering, though, so to fix the choppy ~3-fps
+#   scenes you still want the /dev/dri render node — which is exactly
+#   (and only) what docker-compose.pi5.yml maps:
+#       docker compose -f docker-compose.yml -f docker-compose.pi5.yml up -d
 #
 # ─────────────────────────────────────────────────────────
 # Before using this file on Pi 4, check which video devices

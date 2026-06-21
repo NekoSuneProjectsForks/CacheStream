@@ -23,7 +23,7 @@ overlays, scheduling, and a couple of chat-driven games.
 
 <br/>
 
-![version](https://img.shields.io/badge/version-1.16.0-00f0ff?style=for-the-badge)
+![version](https://img.shields.io/badge/version-1.16.1-00f0ff?style=for-the-badge)
 ![docker](https://img.shields.io/badge/docker-compose-2496ED?style=for-the-badge&logo=docker&logoColor=white)
 ![nextjs](https://img.shields.io/badge/Next.js-14-000?style=for-the-badge&logo=nextdotjs)
 ![twitch](https://img.shields.io/badge/Twitch-OAuth2-9146FF?style=for-the-badge&logo=twitch&logoColor=white)
@@ -803,11 +803,18 @@ scenes faster than a few times a second — so the broadcast looks
 like a ~3-fps slideshow even though FFmpeg pads it to 30 fps CFR.
 Fix: let Chromium use the GPU.
 - Confirm `STREAM_CHROMIUM_GPU` is `auto` (default) or `on`.
-- Pass the GPU render node into the container. **Pi 4:**
+- Pass the GPU render node into the container — **this is the fix.**
+  **Pi 4:**
   `docker compose -f docker-compose.yml -f docker-compose.pi.yml up -d`
-  (the overlay now maps `/dev/dri` alongside the v4l2 encoder).
-  **Pi 5:** map just `/dev/dri` (see the Pi 5 note at the top of
-  `docker-compose.pi.yml`).
+  (maps `/dev/dri` alongside the v4l2 encoder).
+  **Pi 5:**
+  `docker compose -f docker-compose.yml -f docker-compose.pi5.yml up -d`
+  (maps only `/dev/dri` — the Pi 5 has no v4l2 H.264 encoder, so the
+  Pi 4 overlay's `/dev/video*` devices would make Docker error out).
+  Without the render node, Chromium silently falls back to the ~3-fps
+  software compositor even though `STREAM_CHROMIUM_GPU=auto` reports
+  `gpu: on` — the flag enables the GPU *path*, but Chromium still needs
+  the device.
 - The streamer's boot log should show `gpu: on (egl, …)`.
 - Still avoid `backdrop-filter: blur`, full-screen `box-shadow`, and
   giant blurs in custom scenes — they're expensive even on the GPU.

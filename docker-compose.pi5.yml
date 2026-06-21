@@ -1,0 +1,44 @@
+# =========================================================
+# Raspberry Pi 5 overlay
+# =========================================================
+# The Pi 5 (BCM2712) has NO fixed-function H.264 encoder, so — unlike
+# the Pi 4 overlay — we do NOT map /dev/video10/11/12 (they don't exist
+# on a Pi 5 and Docker would error: "no such file or directory"). The
+# streamer auto-detects the Pi 5 and uses a tuned software libx264
+# profile (720p30 veryfast).
+#
+# What this overlay DOES map is the GPU render node (/dev/dri). Without
+# it, in-container Chromium falls back to the CPU software compositor,
+# which can only repaint the animated scenes at ~3 fps — the choppy
+# "3-fps slideshow" you see in the broadcast. With the GPU render node
+# passed through, Chromium rasterises scenes on the V3D GPU and the
+# screencast runs at the full frame rate.
+#
+# The streamer image already ships the Mesa GL/EGL drivers, and
+# STREAM_CHROMIUM_GPU defaults to `auto` (which enables GPU on a Pi), so
+# this device mapping is the only thing you need to add.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.pi5.yml up -d
+#
+# Or persist it for plain `docker compose` commands:
+#   export COMPOSE_FILE=docker-compose.yml:docker-compose.pi5.yml
+#   docker compose up -d
+#
+# If you get "error gathering device information ... /dev/dri: no such
+# file or directory", your Pi OS isn't exposing the render node — make
+# sure you're on a 64-bit Pi OS with the V3D driver (it's on by default
+# on Bookworm). `ls /dev/dri` should show renderD128.
+# =========================================================
+services:
+  streamer:
+    devices:
+      # GPU render node (VideoCore VII / V3D). Lifts Chromium scene
+      # rendering off the ~3 fps software path. This is the whole fix.
+      - /dev/dri:/dev/dri
+    # Pi OS gates the render node behind the `render` group (and video
+    # devices behind `video`). The entrypoint starts as root and drops
+    # privileges with these supplementary groups intact.
+    group_add:
+      - render
+      - video

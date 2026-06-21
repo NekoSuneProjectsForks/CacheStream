@@ -461,6 +461,23 @@ class Streamer extends EventEmitter {
       },
       "streaming to twitch"
     );
+
+    // Loud warning for the most common low-FPS cause: GPU rasterisation
+    // is enabled (e.g. auto-detected a Pi) but the /dev/dri render node
+    // isn't actually mapped into the container — so Chromium silently
+    // falls back to the ~3 fps software compositor. The boot log above
+    // says "gpu: on", but the device must be present for it to work.
+    if (this.config.video.gpuEnabled && !this.config.video.gpuRenderNode) {
+      this.logger.warn(
+        "GPU rasterisation is enabled but no /dev/dri render node is " +
+        "visible in the container — Chromium will fall back to the " +
+        "software compositor and scenes will be capped around ~3 fps. " +
+        "Pass the render node through: on a Pi 5 run with " +
+        "`-f docker-compose.yml -f docker-compose.pi5.yml` (Pi 4: " +
+        "docker-compose.pi.yml). On other hosts add a " +
+        "`devices: [/dev/dri:/dev/dri]` mapping to the streamer service."
+      );
+    }
   }
 
   async _launchBrowser() {
