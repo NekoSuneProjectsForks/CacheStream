@@ -23,7 +23,7 @@ overlays, scheduling, and a couple of chat-driven games.
 
 <br/>
 
-![version](https://img.shields.io/badge/version-1.15.0-00f0ff?style=for-the-badge)
+![version](https://img.shields.io/badge/version-1.16.0-00f0ff?style=for-the-badge)
 ![docker](https://img.shields.io/badge/docker-compose-2496ED?style=for-the-badge&logo=docker&logoColor=white)
 ![nextjs](https://img.shields.io/badge/Next.js-14-000?style=for-the-badge&logo=nextdotjs)
 ![twitch](https://img.shields.io/badge/Twitch-OAuth2-9146FF?style=for-the-badge&logo=twitch&logoColor=white)

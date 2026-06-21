@@ -361,6 +361,8 @@ function LoginStep({
   redirectUri, reqs,
 }: { redirectUri: string; reqs: Requirements }) {
   const canStart = reqs.hasClientId && reqs.hasClientSecret;
+  const [isDesktop, setIsDesktop] = useState(false);
+  useEffect(() => { setIsDesktop(/electron/i.test(navigator.userAgent)); }, []);
   return (
     <section className="card">
       <div className="card-head"><h2>Log in with Twitch</h2></div>
@@ -381,15 +383,25 @@ function LoginStep({
         Redirect URL it's expecting: <code>{redirectUri}</code>
       </p>
 
-      <div className="actions" style={{ marginTop: "1rem" }}>
+      <div className="actions" style={{ marginTop: "1rem", flexWrap: "wrap", gap: ".5rem" }}>
         <a
           className="btn-primary"
           href={canStart ? "/api/auth/twitch/login?from=setup" : "#"}
           aria-disabled={!canStart}
           style={canStart ? {} : { opacity: 0.5, pointerEvents: "none" }}
         >
-          Log in with Twitch
+          Log in with Twitch{isDesktop ? " (popup window)" : ""}
         </a>
+        {isDesktop && (
+          <a
+            className="btn-ghost"
+            href={canStart ? "/api/auth/twitch/login?from=setup&desktop=external" : "#"}
+            aria-disabled={!canStart}
+            style={canStart ? {} : { opacity: 0.5, pointerEvents: "none" }}
+          >
+            Open in your browser instead
+          </a>
+        )}
       </div>
     </section>
   );

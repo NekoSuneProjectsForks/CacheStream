@@ -55,7 +55,6 @@ export default function MusicScene() {
   const analyserRef = useRef<AnalyserNode | null>(null);
   const ctxRef      = useRef<AudioContext | null>(null);
   const sourceRef   = useRef<MediaElementAudioSourceNode | null>(null);
-  const rafRef      = useRef<number | null>(null);
   const lastTrackId = useRef<string | null>(null);
 
   // ---- Poll now-playing ------------------------------------------
@@ -150,26 +149,23 @@ export default function MusicScene() {
 
   // ---- Render loop -----------------------------------------------
   //
-  // v1.9.0: paced to RENDER_FPS (default 30) instead of running
-  // wide-open via requestAnimationFrame. Chromium's RAF cadence is
-  // typically 60Hz; the streamer captures the page at 30fps, so
-  // painting at 60Hz means HALF of our frames are computed,
-  // discarded, and never streamed. Capping at 30 cuts canvas-paint
-  // CPU roughly in half with zero visible difference.
+  // Driven by setInterval at RENDER_FPS, NOT requestAnimationFrame.
+  // rAF is tied to the compositor's vsync, and in the desktop app the
+  // scene renders in an offscreen BrowserWindow that Chromium treats as
+  // hidden — it throttles rAF to a few fps there, so the visualiser
+  // looked like ~3 fps even though the page was captured at 30. A timer
+  // fires at a steady rate regardless, giving a real 30 fps spectrum in
+  // the stream. (We also disable renderer backgrounding in the desktop
+  // main process; this is the belt-and-suspenders half.) The old reason
+  // for capping rAF — it ran at 60 and half the frames were discarded —
+  // still holds: 30 matches the capture rate with no wasted paints.
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    const minFrameInterval = 1000 / RENDER_FPS;
-    let lastDraw = 0;
-
-    const draw = (t: number) => {
-      rafRef.current = requestAnimationFrame(draw);
-      if (t - lastDraw < minFrameInterval) return;
-      lastDraw = t;
-
+    const draw = () => {
       const w = canvas.width = canvas.clientWidth * (window.devicePixelRatio || 1);
       const h = canvas.height = canvas.clientHeight * (window.devicePixelRatio || 1);
 
@@ -189,8 +185,9 @@ export default function MusicScene() {
       drawBars(ctx, bars, w, h);
     };
 
-    rafRef.current = requestAnimationFrame(draw);
-    return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
+    const id = setInterval(draw, 1000 / RENDER_FPS);
+    draw();
+    return () => clearInterval(id);
   }, [mode]);
 
   const hasTrack = !!now?.trackId;

@@ -1,5 +1,56 @@
 # Changelog
 
+## 1.16.0
+
+Desktop streaming overhaul: GPU encoding, smooth video + audio, music
+playlist fixes, and a nicer Twitch login.
+
+### Desktop — GPU encoding
+
+- **Cross-platform GPU encoder auto-detection.** The auto-profile now
+  probes encoders by actually test-encoding a clip, so it picks NVIDIA
+  **NVENC**, AMD **AMF**, Intel **QSV** or Apple **VideoToolbox** when
+  present — on Windows/macOS/Linux. The old detection only checked Linux
+  device files, so the desktop app was always stuck on CPU `libx264`.
+  Falls back to libx264, retries once if a probe loses the cold-boot
+  race with Electron's GPU init, and added AMF encoder args.
+
+### Desktop — video + audio quality
+
+- **Fixed choppy video.** The audio relay is now a realtime pacer that
+  always feeds the streamer a steady PCM stream (music when present,
+  silence otherwise). Previously a stalled music writer starved the
+  muxer and ~98% of video frames were dropped (~6 fps). Also re-times
+  capture to a clean 30 fps CFR and raised ffmpeg's `thread_queue_size`.
+- **Constant bitrate (CBR)** per Twitch's recommendation — no more
+  bitrate dips on low-motion scenes that caused viewer buffering.
+- **Smooth music + a 30 fps spectrum.** Disabled offscreen-renderer
+  throttling so the scene's JS (visualiser + now-playing poll) runs at
+  full speed — the spectrum no longer crawls at ~3 fps and the cover
+  art / title now update live when the track changes. The visualiser is
+  also timer-driven for reliability in the offscreen window.
+
+### Music engine
+
+- **Fixed "Next" looping the same song / not advancing the playlist.**
+  A killed track's exit handler used to fire its advance callback,
+  cascading through the queue and spawning orphan ffmpegs (the source of
+  the `-10053` errors). Only a track's natural end now advances; `stop()`
+  truly stops.
+- Added fade-in/out between tracks and silenced the expected handoff
+  errors.
+
+### Desktop — Twitch login
+
+- Login now opens in a **separate popup window**, with an option to
+  **open it in your external browser** instead (with a token-gated
+  session handoff so the app still logs in). Works over plain http via
+  `localhost`, no HTTPS needed.
+
+### Versions
+
+- Bumped the web, streamer, and desktop package versions to `1.16.0`.
+
 ## 1.15.0
 
 Desktop app becomes a full standalone of all three Docker services, with

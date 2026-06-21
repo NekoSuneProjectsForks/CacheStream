@@ -26,6 +26,12 @@
  */
 function buildVideoCodecArgs(video) {
   const codec = video.codec || "libx264";
+  // Constant bitrate. Twitch strongly recommends CBR: VBR/ABR dips the
+  // bitrate on low-motion scenes (a music visualiser idles ~800 kbps)
+  // and spikes on motion, which causes viewer buffering and "broadcast
+  // starvation" over TCP. Pinning min = target = max with a ~1-second
+  // VBV buffer keeps the bitrate flat and the picture consistent.
+  const cbrKbps = video.bitrateKbps;
   const common = [
     "-c:v", codec,
     "-pix_fmt", "yuv420p",
@@ -33,9 +39,10 @@ function buildVideoCodecArgs(video) {
     "-g", String(video.fps * 2),
     "-keyint_min", String(video.fps * 2),
     "-sc_threshold", "0",
-    "-b:v", `${video.bitrateKbps}k`,
-    "-maxrate", `${video.maxrateKbps}k`,
-    "-bufsize", `${video.bufsizeKbps}k`,
+    "-b:v", `${cbrKbps}k`,
+    "-minrate", `${cbrKbps}k`,
+    "-maxrate", `${cbrKbps}k`,
+    "-bufsize", `${cbrKbps}k`,
   ];
 
   if (codec === "libx264") {
@@ -44,7 +51,9 @@ function buildVideoCodecArgs(video) {
       "-preset", video.preset,
       ...(video.tune ? ["-tune", video.tune] : []),
       "-profile:v", "high",
-      "-x264-params", `threads=${video.x264Threads || 0}:lookahead-threads=1`,
+      // nal-hrd=cbr makes x264 pad to a true constant bitrate (filler
+      // NALs) rather than capped-VBR, which is what Twitch wants.
+      "-x264-params", `nal-hrd=cbr:threads=${video.x264Threads || 0}:lookahead-threads=1`,
     ];
   }
 
@@ -55,6 +64,18 @@ function buildVideoCodecArgs(video) {
       "-preset", "p4",
       "-tune",   "ll",         // low-latency for live streaming
       "-rc",     "cbr",
+      "-profile:v", "high",
+    ];
+  }
+
+  if (codec === "h264_amf") {
+    // AMD AMF (Windows + Linux). CBR for Twitch; "transcoding" usage +
+    // balanced quality is the streaming sweet spot.
+    return [
+      ...common,
+      "-usage", "transcoding",
+      "-rc", "cbr",
+      "-quality", "balanced",
       "-profile:v", "high",
     ];
   }

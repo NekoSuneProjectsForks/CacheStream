@@ -15,7 +15,7 @@
  * does to the Docker streamer, so none of its 70+ routes/workers change.
  */
 
-const { app, BrowserWindow, dialog } = require("electron");
+const { app, BrowserWindow, dialog, shell, session } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
 
@@ -26,6 +26,17 @@ const fs = require("node:fs");
 app.commandLine.appendSwitch("ignore-gpu-blocklist");
 app.commandLine.appendSwitch("enable-gpu-rasterization");
 app.commandLine.appendSwitch("enable-zero-copy");
+
+// The scene renders in an OFFSCREEN BrowserWindow, which Chromium treats
+// as hidden/occluded and aggressively throttles — JS timers and
+// requestAnimationFrame drop to a few fps even though the compositor
+// keeps painting at 30. That makes the music visualiser crawl (~3 fps)
+// and the now-playing poll (cover art / title) stop updating until the
+// scene is reloaded. These switches keep the renderer running at full
+// speed so JS-driven animation + polling match the capture rate.
+app.commandLine.appendSwitch("disable-background-timer-throttling");
+app.commandLine.appendSwitch("disable-renderer-backgrounding");
+app.commandLine.appendSwitch("disable-backgrounding-occluded-windows");
 
 const { resolveDirs, webBundleDir, resolveFfmpeg, freePort, preferredPort, lanAddress } = require("./paths");
 const { loadOrCreateToken } = require("./token");
@@ -184,6 +195,9 @@ async function boot() {
       INGEST_HTTP_URL: `http://127.0.0.1:${ingestHttpPort}`,
       RTMP_PORT: String(rtmpPort),
       ...(lanIp ? { RTMP_PUBLIC_HOST: lanIp } : {}),
+      // Enables the desktop-only session-handoff endpoint used by the
+      // "login in external browser" flow.
+      DESKTOP: "1",
     },
   });
   state.webChild = child;
@@ -202,6 +216,7 @@ async function boot() {
 
   // ── Window + tray ─────────────────────────────────────────────
   state.panelWindow = createPanelWindow(panelOrigin);
+  attachLoginHandling(state.panelWindow, { panelOrigin, webPort, token, logger });
   state.tray = createTray({
     getWindow: () => state.panelWindow,
     onQuit: () => app.quit(),
@@ -212,8 +227,106 @@ async function boot() {
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0 && !state.quitting) {
       state.panelWindow = createPanelWindow(panelOrigin);
+      attachLoginHandling(state.panelWindow, { panelOrigin, webPort, token, logger });
     }
   });
+}
+
+// ── Twitch login: separate popup window, or external browser ──────
+//
+// The panel's login link is a normal <a href="/api/auth/twitch/login">.
+// We intercept that navigation on the main window so it never takes over
+// the panel:
+//   - default              → open it in a dedicated popup BrowserWindow
+//                            (same Electron session, so the cs_session
+//                            cookie the callback sets is shared with the
+//                            main window — just reload it on success).
+//   - ?desktop=external    → hand the URL to the system browser, then
+//                            poll the desktop-session endpoint and inject
+//                            the resulting session cookie into Electron's
+//                            jar (the external browser's cookie can't
+//                            reach us otherwise).
+function attachLoginHandling(win, ctx) {
+  if (!win || win.__loginWired) return;
+  win.__loginWired = true;
+  const loginPrefix = `${ctx.panelOrigin}/api/auth/twitch/login`;
+  win.webContents.on("will-navigate", (e, url) => {
+    if (!url.startsWith(loginPrefix)) return;
+    e.preventDefault();
+    if (/[?&]desktop=external(?:&|$)/.test(url)) startExternalLogin(win, ctx, url);
+    else openLoginPopup(win, ctx, url);
+  });
+}
+
+function openLoginPopup(parent, ctx, loginUrl) {
+  const popup = new BrowserWindow({
+    width: 520, height: 800,
+    parent, modal: false,
+    title: "Log in with Twitch",
+    backgroundColor: "#0a0d18",
+    autoHideMenuBar: true,
+    webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true },
+  });
+  const onNav = (_e, url) => {
+    // The callback redirects to <panel>/admin on success. The session
+    // cookie is now in the shared jar → reload the main window.
+    if (url.startsWith(`${ctx.panelOrigin}/admin`)) {
+      try { popup.close(); } catch {}
+      reloadPanel(parent, ctx);
+    }
+  };
+  popup.webContents.on("did-navigate", onNav);
+  popup.webContents.on("did-redirect-navigation", onNav);
+  popup.loadURL(loginUrl);
+}
+
+async function startExternalLogin(win, ctx, loginUrl) {
+  // Drop our marker param; the login route ignores it anyway.
+  const clean = loginUrl
+    .replace(/([?&])desktop=external(&|$)/, (_m, p1, p2) => (p2 === "&" ? p1 : ""))
+    .replace(/[?&]$/, "");
+  try { await shell.openExternal(clean); } catch (err) {
+    ctx.logger?.warn?.({ err: err?.message }, "could not open external browser");
+  }
+  pollDesktopSession(win, ctx, Date.now() + 5 * 60 * 1000);
+}
+
+async function pollDesktopSession(win, ctx, deadline) {
+  if (Date.now() > deadline) {
+    ctx.logger?.warn?.("external-login handoff timed out");
+    return;
+  }
+  try {
+    const res = await fetch(`http://127.0.0.1:${ctx.webPort}/api/auth/desktop-session`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${ctx.token}` },
+    });
+    if (res.status === 200) {
+      const { value, expiresAt } = await res.json();
+      await session.defaultSession.cookies.set({
+        url: ctx.panelOrigin,
+        name: "cs_session",
+        value,
+        path: "/",
+        httpOnly: true,
+        sameSite: "lax",
+        expirationDate: Math.floor((expiresAt || Date.now() + 14 * 86400000) / 1000),
+      });
+      ctx.logger?.info?.("external-login session synced into the app");
+      reloadPanel(win, ctx);
+      return;
+    }
+  } catch { /* server momentarily unreachable — retry */ }
+  setTimeout(() => pollDesktopSession(win, ctx, deadline), 2000);
+}
+
+function reloadPanel(win, ctx) {
+  try {
+    if (win && !win.isDestroyed()) {
+      win.show(); win.focus();
+      win.loadURL(`${ctx.panelOrigin}/admin`);
+    }
+  } catch { /* window gone */ }
 }
 
 app.on("window-all-closed", () => {

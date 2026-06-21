@@ -302,7 +302,13 @@ class DesktopStreamer extends EventEmitter {
   _startPainting() {
     const wc = this.win.webContents;
     const quality = this.config.video.screencastQuality;
-    const BACKPRESSURE_DROP_THRESHOLD = 256 * 1024;
+    // Headroom of several encoded frames before we start dropping. A
+    // single 1080p MJPEG frame can be ~200-400 KB, so the old 256 KB
+    // cap dropped everything after one buffered frame the instant
+    // FFmpeg hiccupped. ~12 MB ≈ a few hundred ms of slack at 1080p,
+    // enough to ride out transient stalls without choppiness while
+    // still bounding latency.
+    const BACKPRESSURE_DROP_THRESHOLD = 12 * 1024 * 1024;
 
     wc.on("paint", (_event, _dirty, image) => {
       const ffmpeg = this.ffmpeg;
@@ -338,20 +344,31 @@ class DesktopStreamer extends EventEmitter {
     const rtmpUrl = `${twitch.ingestUrl}/${twitch.streamKey}`;
     const safeUrl = `${twitch.ingestUrl}/***`;
     const logLevel = process.env.STREAM_FFMPEG_LOGLEVEL || "warning";
-    const vFilter = buildVideoFilters(video);
+    // Offscreen 'paint' events don't fire at perfectly even intervals,
+    // so the wallclock-stamped frames have jittery PTS. Twitch's
+    // low-latency player can't smooth that — it shows up as "skipped
+    // frames" + buffering even when the viewer has bandwidth to spare.
+    // Re-time every frame onto a clean constant-frame-rate grid with
+    // the fps filter so the output PTS are perfectly evenly spaced.
+    // (buildVideoFilters already returns an fps step in capture-every-
+    // nth mode; otherwise we add one ourselves.)
+    const vFilter = buildVideoFilters(video) || `fps=${video.fps}`;
 
     const args = [
       "-hide_banner", "-loglevel", logLevel, "-nostats",
 
       // Input 0: MJPEG frames from the offscreen window over stdin.
-      "-thread_queue_size", "32",
+      // Large thread_queue_size so a brief encoder/RTMP hiccup doesn't
+      // block the reader thread (which would stall video intake and
+      // make us drop frames). 32 was far too small for 1080p frames.
+      "-thread_queue_size", "1024",
       "-framerate", String(video.fps),
       "-use_wallclock_as_timestamps", "1",
       "-f", "image2pipe", "-vcodec", "mjpeg", "-i", "-",
 
-      // Input 1: PCM audio from the relay (always-on; silence when
-      // no track is playing). A single input → no amix needed.
-      "-thread_queue_size", "32",
+      // Input 1: PCM audio from the relay (always-on realtime carrier;
+      // silence when no track is playing). A single input → no amix.
+      "-thread_queue_size", "1024",
       "-f", "s16le", "-ar", "44100", "-ac", "2",
       "-i", `tcp://127.0.0.1:${this.relayOutPort}`,
 

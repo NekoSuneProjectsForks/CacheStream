@@ -294,9 +294,11 @@ class MusicEngine {
     this.currentRadioUrl = null;
     this.nowPlaying = null;
     this._killFfmpeg();
-    // Silence filler keeps running on its dedicated FIFO — no
-    // restart needed. The streamer's amix just stops mixing in
-    // music and the broadcast continues silent.
+    // The killed track's exit handler no longer resumes the filler
+    // (it's guarded against the intentional-kill cascade), so resume it
+    // here explicitly to keep music.fifo fed in Docker/FIFO mode. In
+    // tcp mode the relay supplies the silence carrier, nothing to do.
+    if (!TCP) this._resumeMusicFiller();
   }
 
   setVolume(v: number): void {
@@ -350,7 +352,7 @@ class MusicEngine {
     this._spawnFfmpegForInput(["-i", full], () => {
       // On natural EOF, advance to the next track.
       if (this.mode === "library") this._playNextLibraryTrack();
-    });
+    }, track.durationS || null);
   }
 
   private _restartCurrent(): void {
@@ -364,7 +366,11 @@ class MusicEngine {
     }
   }
 
-  private _spawnFfmpegForInput(inputArgs: string[], onExit?: () => void): void {
+  private _spawnFfmpegForInput(
+    inputArgs: string[],
+    onExit?: () => void,
+    durationS?: number | null,
+  ): void {
     this._ensureFifos();
     this._killFfmpeg();
 
@@ -391,12 +397,21 @@ class MusicEngine {
     //     for operators who want the older behaviour back.
     const loudnessFilter = process.env.MUSIC_LOUDNESS_FILTER
       || "dynaudnorm=f=500:g=15:p=0.95";
+    // Smooth track changes: fade in at the start, and fade out near the
+    // end when we know the duration (radio is live → fade-in only). The
+    // fades go LAST in the chain so dynaudnorm can't undo them.
+    const FADE_S = 1.5;
+    const fades = [`afade=t=in:st=0:d=${FADE_S}`];
+    if (durationS && durationS > FADE_S * 2 + 1) {
+      fades.push(`afade=t=out:st=${(durationS - FADE_S).toFixed(2)}:d=${FADE_S}`);
+    }
+    const af = `volume=${this.volume.toFixed(3)},${loudnessFilter},${fades.join(",")}`;
     const args = [
       "-hide_banner", "-loglevel", "warning", "-nostats",
       "-re",
       ...inputArgs,
       "-vn",
-      "-af", `volume=${this.volume.toFixed(3)},${loudnessFilter}`,
+      "-af", af,
       ...AUDIO_FORMAT,
       "-y", MUSIC_SINK,
     ];
@@ -410,18 +425,29 @@ class MusicEngine {
     this.ffmpeg = proc;
     proc.stderr.on("data", (chunk) => {
       const line = chunk.toString().trim();
-      if (line && /error|failed|cannot|unable/i.test(line)) {
+      if (!line) return;
+      // When we swap tracks (next / restart / stop) the old ffmpeg's
+      // sink write is torn down, which ffmpeg reports as a muxer/socket
+      // abort (-10053 on Windows, EPIPE/"Broken pipe" elsewhere). That's
+      // expected on a handoff — don't surface it as a user-facing error.
+      if (/muxing a packet|submitting a packet|-?10053|Broken pipe|Connection reset|Conversion failed/i.test(line)) {
+        return;
+      }
+      if (/error|failed|cannot|unable/i.test(line)) {
         this.lastError = line;
       }
     });
     proc.on("exit", () => {
+      // CRITICAL: only the CURRENT track's NATURAL end advances the
+      // queue. When we kill a track to play the next one (or to stop),
+      // _killFfmpeg has already pointed this.ffmpeg elsewhere — its exit
+      // must NOT run onExit, or every manual "next" cascades through the
+      // whole playlist and spawns orphan ffmpegs that fight over the
+      // relay (the -10053 storm + "stuck on one song" symptom).
+      if (this.ffmpeg !== proc) return;
       this.ffmpeg = null;
-      // Resume the silence filler on the music FIFO so the
-      // streamer's open(music.fifo) stays satisfied between
-      // tracks. amix in the streamer's filter graph carries on
-      // mixing silence — the listener hears the silence.fifo
-      // carrier (which is also silence when no music's playing,
-      // so it's just quiet, as expected).
+      // Resume the silence filler so the streamer's open(music.fifo)
+      // stays satisfied between tracks (Docker/FIFO mode only).
       if (!TCP) this._resumeMusicFiller();
       if (onExit) {
         try { onExit(); } catch (err) { console.warn("[music] onExit:", err); }
