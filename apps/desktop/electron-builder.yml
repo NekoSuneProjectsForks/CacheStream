@@ -57,9 +57,16 @@ win:
   target:
     - nsis
     - portable
+  # NSIS uses this name (CacheStream-x.y.z-win-x64.exe). The portable
+  # target overrides its own name below — without that, BOTH produce
+  # the same .exe filename, which collides and breaks publishing (you
+  # end up with only the .blockmap uploaded, no installer + no latest.yml).
   artifactName: CacheStream-${version}-win-${arch}.${ext}
 
 nsis:
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
+
+portable:
+  artifactName: CacheStream-${version}-win-${arch}-portable.${ext}
