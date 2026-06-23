@@ -16,6 +16,7 @@ import { ChatTab } from "./tabs/ChatTab";
 import { CommandsTab } from "./tabs/CommandsTab";
 import { AlertsTab } from "./tabs/AlertsTab";
 import { MusicTab } from "./tabs/MusicTab";
+import { VisualizerTab } from "./tabs/VisualizerTab";
 import { VodsTab } from "./tabs/VodsTab";
 import { GamesTab } from "./tabs/GamesTab";
 import { BrandingTab } from "./tabs/BrandingTab";
@@ -46,7 +47,7 @@ interface Props {
 
 type TabKey =
   | "status" | "studio" | "scenes" | "sources" | "info" | "chat"
-  | "commands" | "alerts" | "music" | "vods" | "games"
+  | "commands" | "alerts" | "music" | "visualizer" | "vods" | "games"
   | "branding" | "staff";
 
 /**
@@ -65,6 +66,7 @@ const TABS: Array<{ key: TabKey; label: string; ownerOnly?: boolean }> = [
   { key: "commands", label: "Commands / AutoMod" },
   { key: "alerts",   label: "Alerts" },
   { key: "music",    label: "Music" },
+  { key: "visualizer", label: "Visualizer" },
   { key: "vods",     label: "VODs" },
   { key: "games",    label: "Games" },
   { key: "branding", label: "Branding", ownerOnly: true },
@@ -162,8 +164,9 @@ export function AdminPanel(props: Props) {
         {tab === "chat"     && <ChatTab />}
         {tab === "commands" && <CommandsTab />}
         {tab === "alerts"   && <AlertsTab />}
-        {tab === "music"    && <MusicTab />}
-        {tab === "vods"     && <VodsTab />}
+        {tab === "music"      && <MusicTab />}
+        {tab === "visualizer" && <VisualizerTab />}
+        {tab === "vods"       && <VodsTab />}
         {tab === "games"    && <GamesTab />}
         {tab === "branding" && props.role === "owner" && <BrandingTab initial={props.branding} />}
         {tab === "staff"    && props.role === "owner" && <StaffTab />}

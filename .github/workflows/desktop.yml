@@ -137,7 +137,7 @@ jobs:
         if: steps.pub.outputs.mode != 'always'
         uses: actions/upload-artifact@v4
         with:
-          name: cachestream-${{ matrix.name }}
+          name: ${{ github.event.repository.name }}-${{ matrix.name }}
           path: |
             apps/desktop/dist/*.AppImage
             apps/desktop/dist/*.deb

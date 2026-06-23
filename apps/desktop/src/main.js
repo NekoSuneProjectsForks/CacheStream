@@ -18,6 +18,7 @@
 const { app, BrowserWindow, dialog, shell, session } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
+const { appName } = require("./app-name");
 
 // Best-effort GPU enablement for the offscreen scene renderer. This
 // is the desktop equivalent of the Docker Pi FPS fix — on a Pi the
@@ -74,7 +75,7 @@ if (!singleInstance) {
       const detail = err?.code === "WEB_BUNDLE_MISSING"
         ? `${err.message}\n\nThen relaunch the app.`
         : (err?.stack || String(err));
-      dialog.showErrorBox("CacheStream failed to start", detail);
+      dialog.showErrorBox(`${appName()} failed to start`, detail);
     } catch {}
     app.quit();
   });
@@ -133,6 +134,10 @@ async function boot() {
   process.env.FFMPEG_PATH = ffmpegPath;
   process.env.DEFAULT_SCENE_URL = `${panelOrigin}/scene`;
   process.env.NODE_ENV = "production";
+  // Repo-derived app name (default CacheStream) — inherited by the web
+  // server child (see web-server.js), which uses it for the default
+  // branding name + page titles so the panel/scenes rename with the repo.
+  process.env.APP_NAME = appName();
 
   const config = buildConfig({ logger: console });
   const logger = createLogger(config.runtime.logLevel || "info").child({ module: "desktop" });

@@ -4,6 +4,7 @@ import { getStore } from "@/lib/store";
 import { SceneFrame } from "../../_shared/SceneFrame";
 import { Countdown } from "../../_shared/Countdown";
 import { SocialRow } from "../../_shared/SocialRow";
+import { appName } from "@/lib/app-name";
 
 export const dynamic = "force-dynamic";
 
@@ -11,7 +12,7 @@ interface Params { params: { slug: string } }
 
 export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const scene = getStore().getCustomSceneBySlug(params.slug);
-  return { title: `CacheStream :: ${scene?.name || "scene"}` };
+  return { title: `${appName()} :: ${scene?.name || "scene"}` };
 }
 
 /**

@@ -9,3 +9,8 @@ data/
 /.claude
 # Local test/dev launchers — never committed
 *.bat
+# Generated at build time by apps/desktop/scripts/eb.mjs (repo-derived name)
+apps/desktop/src/app-name.json
+# Optional local desktop build branding override (APP_NAME/GH_OWNER/...).
+# Covered by the `.env` rule above; listed explicitly for clarity.
+apps/desktop/.env

@@ -27,9 +27,8 @@
  */
 
 const { app, dialog, shell, BrowserWindow } = require("electron");
+const { appName, releasesUrl } = require("./app-name");
 
-const RELEASES_URL =
-  "https://github.com/NekoSuneProjectsForks/CacheStream/releases/latest";
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000; // re-check every 6 hours
 
 // ---- Markdown → HTML -------------------------------------------------
@@ -93,7 +92,7 @@ function buildHtml({ version, currentVersion, notesHtml }) {
 </style></head>
 <body><div class="wrap">
   <header>
-    <h1>Update available — CacheStream ${escapeHtml(version)}</h1>
+    <h1>Update available — ${escapeHtml(appName())} ${escapeHtml(version)}</h1>
     <div class="sub">You're on ${escapeHtml(currentVersion)}. Here's what's new:</div>
   </header>
   <div class="notes">${notesHtml}</div>
@@ -172,7 +171,7 @@ function initUpdater({ getWindow, logger } = {}) {
       } catch (err) {
         // Target can't self-install (.deb / portable) or download failed.
         logger?.warn?.({ err: err?.message }, "update download failed; opening releases page");
-        await shell.openExternal(RELEASES_URL);
+        await shell.openExternal(releasesUrl());
         busy = false;
       }
     } else {
@@ -184,7 +183,7 @@ function initUpdater({ getWindow, logger } = {}) {
     const { response } = await dialog.showMessageBox(getWindow?.() || null, {
       type: "info",
       title: "Update ready",
-      message: `CacheStream ${info.version} downloaded`,
+      message: `${appName()} ${info.version} downloaded`,
       detail:
         "Restart now to finish installing? If you're live, your stream " +
         "will briefly stop — otherwise it installs the next time you quit.",

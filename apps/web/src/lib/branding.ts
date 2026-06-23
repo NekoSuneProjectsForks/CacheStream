@@ -15,6 +15,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { config } from "./config";
 import { kvGet, kvSet, kvDelete } from "./db";
+import { appName } from "./app-name";
 
 export interface Branding {
   /** Streamer's display name. Shown in the brand ribbon. */
@@ -29,10 +30,8 @@ export interface Branding {
   logoUrl: string | null;
 }
 
-const DEFAULT_NAME = "CacheStream";
-
 export function getBranding(): Branding {
-  const displayName = kvGet("branding_display_name") || DEFAULT_NAME;
+  const displayName = kvGet("branding_display_name") || appName();
   const tagline = kvGet("branding_tagline");
   const accent  = kvGet("branding_accent");
   const logoFile = kvGet("branding_logo_file");

@@ -8,20 +8,35 @@
  * server-only companion lib/visualizer.ts.
  */
 
-export type VisualizerLayout = "bars" | "mirror" | "circular" | "waveform";
+export type VisualizerLayout =
+  | "bars"
+  | "mirror"
+  | "waveform"
+  | "trapnation"
+  | "ncs"
+  | "monstercat";
 
 export const VISUALIZER_LAYOUTS: VisualizerLayout[] = [
+  "trapnation",
+  "ncs",
+  "monstercat",
   "bars",
   "mirror",
-  "circular",
   "waveform",
 ];
 
 export const VISUALIZER_LAYOUT_LABELS: Record<VisualizerLayout, string> = {
+  trapnation: "Trap Nation (circular)",
+  ncs: "NCS (circular)",
+  monstercat: "Monstercat (bars)",
   bars: "Bars",
   mirror: "Mirror bars",
-  circular: "Circular (radial)",
   waveform: "Waveform",
+};
+
+/** Back-compat: the old "circular" layout is now "trapnation". */
+const LAYOUT_ALIASES: Record<string, VisualizerLayout> = {
+  circular: "trapnation",
 };
 
 export interface VisualizerConfig {
@@ -43,6 +58,13 @@ export interface VisualizerConfig {
   particles: boolean;
   /** Spinning vinyl behind the cover (bars/mirror layouts). */
   showVinyl: boolean;
+  /** Custom background image URL ("" = the built-in gradient). May be an
+   *  absolute http(s) URL or a same-origin path like /api/music/background. */
+  background: string;
+  /** Beat-reactive full-screen flash overlay (vizzy-style). */
+  flash: boolean;
+  /** Beat-reactive screen shake (vizzy-style). */
+  shake: boolean;
 }
 
 export const VISUALIZER_DEFAULTS: VisualizerConfig = {
@@ -55,9 +77,19 @@ export const VISUALIZER_DEFAULTS: VisualizerConfig = {
   mirror: true,
   particles: true,
   showVinyl: true,
+  background: "",
+  flash: false,
+  shake: false,
 };
 
 const HEX = /^#[0-9a-fA-F]{6}$/;
+
+/** Allow http(s) URLs or same-origin paths only (no javascript:, data: etc). */
+function isSafeBg(v: string): boolean {
+  const s = v.trim();
+  if (s === "") return true; // explicit "none"
+  return /^https?:\/\//i.test(s) || s.startsWith("/");
+}
 
 function clampNum(n: unknown, lo: number, hi: number, fallback: number): number {
   const v = Number(n);
@@ -70,7 +102,8 @@ export function normalizeVisualizer(parsed: any): VisualizerConfig {
   const out: VisualizerConfig = { ...VISUALIZER_DEFAULTS };
   if (!parsed || typeof parsed !== "object") return out;
 
-  if (VISUALIZER_LAYOUTS.includes(parsed.layout)) out.layout = parsed.layout;
+  const aliased = LAYOUT_ALIASES[parsed.layout] || parsed.layout;
+  if (VISUALIZER_LAYOUTS.includes(aliased)) out.layout = aliased;
   if (typeof parsed.accent === "string" && HEX.test(parsed.accent)) out.accent = parsed.accent;
   if (typeof parsed.accent2 === "string" && HEX.test(parsed.accent2)) out.accent2 = parsed.accent2;
   out.sensitivity = clampNum(parsed.sensitivity, 0.5, 2.5, VISUALIZER_DEFAULTS.sensitivity);
@@ -79,5 +112,10 @@ export function normalizeVisualizer(parsed: any): VisualizerConfig {
   if (typeof parsed.mirror === "boolean") out.mirror = parsed.mirror;
   if (typeof parsed.particles === "boolean") out.particles = parsed.particles;
   if (typeof parsed.showVinyl === "boolean") out.showVinyl = parsed.showVinyl;
+  if (typeof parsed.background === "string" && isSafeBg(parsed.background)) {
+    out.background = parsed.background.trim();
+  }
+  if (typeof parsed.flash === "boolean") out.flash = parsed.flash;
+  if (typeof parsed.shake === "boolean") out.shake = parsed.shake;
   return out;
 }

@@ -81,6 +81,13 @@ export default function MusicScene() {
   const freqBuf = useRef<Uint8Array<ArrayBuffer> | null>(null);
   const timeBuf = useRef<Uint8Array<ArrayBuffer> | null>(null);
 
+  // Beat-reactive FX (flash + shake). Driven imperatively from the
+  // render loop via these element refs so we never re-render React at
+  // frame rate. `beat` holds the decaying flash/shake envelopes.
+  const stageElRef = useRef<HTMLElement | null>(null);
+  const flashElRef = useRef<HTMLDivElement | null>(null);
+  const beat = useRef({ env: 0, flash: 0, shake: 0 });
+
   // ---- Poll now-playing ------------------------------------------
   useEffect(() => {
     let cancelled = false;
@@ -226,6 +233,40 @@ export default function MusicScene() {
       const an = analyserRef.current;
       const live = an && mode === "library";
 
+      // Read frequency data at most once per frame; shared by the beat
+      // FX and the bar/circular layouts.
+      const needFreq = cfg.layout !== "waveform" || cfg.flash || cfg.shake;
+      let freqReady = false;
+      if (live && freqBuf.current && needFreq) {
+        an!.getByteFrequencyData(freqBuf.current);
+        freqReady = true;
+      }
+
+      // ---- Beat-reactive flash + shake (BASS-driven) ----
+      if (cfg.flash || cfg.shake) {
+        let bass: number;
+        if (freqReady && freqBuf.current) {
+          // At fftSize 256 each bin ≈ 172 Hz; bins 0–5 cover the
+          // sub-bass/kick band (~0–1 kHz). Peak (not mean) of that band
+          // tracks kick/bass hits tightly so the beat fires on the drum.
+          let peak = 0;
+          const k = Math.min(6, freqBuf.current.length);
+          for (let i = 0; i < k; i++) peak = Math.max(peak, freqBuf.current[i]);
+          bass = peak / 255;
+        } else {
+          bass = 0.4 + 0.3 * Math.abs(Math.sin(performance.now() / 340)); // procedural pulse
+        }
+        stepBeat(beat.current, bass);
+        applyBeatFx(beat.current, cfg, stageElRef.current, flashElRef.current);
+      } else {
+        if (stageElRef.current && stageElRef.current.style.transform) {
+          stageElRef.current.style.transform = "";
+        }
+        if (flashElRef.current && flashElRef.current.style.opacity !== "0") {
+          flashElRef.current.style.opacity = "0";
+        }
+      }
+
       if (cfg.layout === "waveform") {
         let wave: number[];
         if (live && timeBuf.current) {
@@ -238,19 +279,19 @@ export default function MusicScene() {
         return;
       }
 
-      // Frequency-domain layouts (bars / mirror / circular).
+      // Frequency-domain layouts (bars / mirror / trapnation / ncs / monstercat).
       let bars: number[];
-      if (live && freqBuf.current) {
-        an!.getByteFrequencyData(freqBuf.current);
+      if (freqReady && freqBuf.current) {
         bars = sampleBars(freqBuf.current, cfg.barCount, cfg.sensitivity);
       } else {
         bars = procedural(cfg.barCount);
       }
 
-      if (cfg.layout === "circular") {
-        drawCircular(ctx, bars, w, h, dpr, cfg, particles);
-      } else {
-        drawBars(ctx, bars, w, h, dpr, cfg, barGrad!);
+      switch (cfg.layout) {
+        case "trapnation": drawTrapNation(ctx, bars, w, h, dpr, cfg, particles); break;
+        case "ncs":        drawNcs(ctx, bars, w, h, dpr, cfg, particles); break;
+        case "monstercat": drawMonstercat(ctx, bars, w, h, dpr, cfg, barGrad!); break;
+        default:           drawBars(ctx, bars, w, h, dpr, cfg, barGrad!);
       }
     };
 
@@ -263,7 +304,7 @@ export default function MusicScene() {
   const hasTrack = !!now?.trackId;
   // Cover-art cascade: track cover → broadcaster logo → ♫ placeholder.
   const coverUrl = hasTrack ? `/api/music/cover/${now!.trackId}` : "/api/branding/logo";
-  const isCircular = cfg.layout === "circular";
+  const isCircular = cfg.layout === "trapnation" || cfg.layout === "ncs";
 
   const badge =
     mode === "radio" ? "ON AIR · RADIO" :
@@ -281,63 +322,92 @@ export default function MusicScene() {
     (img.nextElementSibling as HTMLElement | null)?.style.removeProperty("display");
   };
 
+  // Custom background (over the default gradient) + the beat-flash
+  // overlay. Rendered as the first children of the stage so the custom
+  // image sits behind the spectrum/content and both shake with the
+  // stage. The flash opacity is driven imperatively in the render loop.
+  const bgCss = (cfg.background || "").trim();
+  const stageFx = (
+    <>
+      {bgCss && (
+        <div
+          className="custom-bg"
+          style={{ backgroundImage: `url("${bgCss.replace(/["\\]/g, "")}")` }}
+        />
+      )}
+      <div className="beat-flash" ref={flashElRef} style={{ background: cfg.accent }} />
+    </>
+  );
+
   return (
     <>
-      <style>{baseCss}</style>
-      <style>{`
-        .stage {
-          --accent: ${cfg.accent};
-          --accent2: ${cfg.accent2};
-        }
-      `}</style>
+      {/* dangerouslySetInnerHTML (not a text child) so React doesn't
+          HTML-escape the quotes inside the CSS — escaping happens only
+          on the server render and produced a hydration text mismatch. */}
+      <style dangerouslySetInnerHTML={{ __html: baseCss }} />
+      <style dangerouslySetInnerHTML={{ __html:
+        `.stage{--accent:${cfg.accent};--accent2:${cfg.accent2};}`
+      }} />
 
-      {isCircular ? (
-        /* ---------- Circular / radial (vizzy-style) ---------- */
-        <main className="stage stage-circular">
-          <canvas ref={canvasRef} className="vis-full" />
-          <div className="circ-center">
-            <div className="circ-cover-ring">
-              <img className="circ-cover" src={coverUrl} alt="" onError={onCoverError} />
-              <div className="circ-cover-ph" style={{ display: "none" }}>♫</div>
-            </div>
+      {/* ONE stable <main> + <audio>. Only the inner content swaps when
+          the layout changes — the audio element and its Web Audio graph
+          (MediaElementSource → analyser) MUST NOT be unmounted on a layout
+          switch, or the analyser detaches (spectrum freezes) and playback
+          is disrupted. So the audio + bg/flash live outside the branch. */}
+      <main className={`stage${isCircular ? " stage-circular" : ""}`} ref={stageElRef}>
+        {stageFx}
+
+        {isCircular ? (
+          /* ---------- Circular / radial (Trap Nation / NCS) ---------- */
+          <>
+            {/* Cover ring is pinned to the viewport centre so it stays
+                concentric with the radial spectrum (canvas w/2, h/2). */}
+            <canvas ref={canvasRef} className="vis-full" />
+            {/* Trap Nation keeps the cover in the ring centre; NCS is the
+                bare wireframe sphere (no centre cover). */}
+            {cfg.layout === "trapnation" && (
+              <div className="circ-cover-ring">
+                <img className="circ-cover" src={coverUrl} alt="" onError={onCoverError} />
+                <div className="circ-cover-ph" style={{ display: "none" }}>♫</div>
+              </div>
+            )}
             <div className="circ-meta">
               <span className="badge"><span className="pulse" />{badge}</span>
               <div className="circ-title">{title}</div>
               <div className="circ-artist">{artist}</div>
               {now?.album && <div className="album">{now.album}</div>}
             </div>
-          </div>
-          <span className="station">CacheStream · 91.7 FM</span>
-          <Clock />
-          <audio ref={audioRef} muted playsInline preload="auto" crossOrigin="anonymous" />
-        </main>
-      ) : (
-        /* ---------- Bars / mirror / waveform ---------- */
-        <main className="stage">
-          <div className="top">
-            <div className="cover-wrap">
-              {cfg.showVinyl && <div className="vinyl" />}
-              <img className="cover" src={coverUrl} alt="" onError={onCoverError} />
-              <div className="cover-placeholder" style={{ display: "none", position: "absolute", inset: 0 }}>♫</div>
-            </div>
-
-            <div className="meta">
-              <span className="badge"><span className="pulse" />{badge}</span>
-              <div className="title">{title}</div>
-              <div className="artist">{artist}</div>
-              {now?.album && <div className="album">{now.album}</div>}
-            </div>
-          </div>
-
-          <div className="vis-wrap">
-            <span className="station">CacheStream  ·  91.7 FM</span>
-            <canvas ref={canvasRef} />
+            <span className="station">CacheStream · 91.7 FM</span>
             <Clock />
-          </div>
+          </>
+        ) : (
+          /* ---------- Bars / mirror / waveform / monstercat ---------- */
+          <>
+            <div className="top">
+              <div className="cover-wrap">
+                {cfg.showVinyl && <div className="vinyl" />}
+                <img className="cover" src={coverUrl} alt="" onError={onCoverError} />
+                <div className="cover-placeholder" style={{ display: "none", position: "absolute", inset: 0 }}>♫</div>
+              </div>
 
-          <audio ref={audioRef} muted playsInline preload="auto" crossOrigin="anonymous" />
-        </main>
-      )}
+              <div className="meta">
+                <span className="badge"><span className="pulse" />{badge}</span>
+                <div className="title">{title}</div>
+                <div className="artist">{artist}</div>
+                {now?.album && <div className="album">{now.album}</div>}
+              </div>
+            </div>
+
+            <div className="vis-wrap">
+              <span className="station">CacheStream  ·  91.7 FM</span>
+              <canvas ref={canvasRef} />
+              <Clock />
+            </div>
+          </>
+        )}
+
+        <audio ref={audioRef} muted playsInline preload="auto" crossOrigin="anonymous" />
+      </main>
 
       {/* hideNowPlaying — the music scene IS the now-playing display. */}
       <ClientSceneOverlays hideNowPlaying />
@@ -396,6 +466,22 @@ function sampleBars(data: Uint8Array, n: number, sensitivity: number): number[] 
   return bars;
 }
 
+/** Moving-average smooth (window = 2*radius+1) for the soft NCS/Trap look. */
+function smoothArray(arr: number[], radius: number): number[] {
+  if (radius <= 0) return arr;
+  const n = arr.length;
+  const out = new Array(n);
+  for (let i = 0; i < n; i++) {
+    let sum = 0, cnt = 0;
+    for (let j = -radius; j <= radius; j++) {
+      const k = i + j;
+      if (k >= 0 && k < n) { sum += arr[k]; cnt++; }
+    }
+    out[i] = sum / cnt;
+  }
+  return out;
+}
+
 function procedural(n: number): number[] {
   const t = performance.now() / 600;
   const bars: number[] = [];
@@ -415,6 +501,44 @@ function proceduralWave(n: number): number[] {
     out.push(0.35 * Math.sin(t + x * Math.PI * 6) * (0.6 + 0.4 * Math.sin(t * 0.7 + x * 3)));
   }
   return out;
+}
+
+interface BeatState { env: number; flash: number; shake: number; }
+
+/**
+ * Advance the beat envelope from the current bass level. Fires a beat
+ * (sets flash/shake to 1) when bass exceeds a moving average — then both
+ * decay each frame so the FX feel like punches, not a constant glow.
+ */
+function stepBeat(b: BeatState, bass: number) {
+  const isBeat = bass > b.env * 1.3 && bass > 0.35;
+  b.env = b.env * 0.92 + bass * 0.08;
+  if (isBeat) { b.flash = 1; b.shake = 1; }
+  b.flash *= 0.80;
+  b.shake *= 0.78;
+}
+
+/** Apply the decaying beat envelope to the stage (shake) + flash overlay. */
+function applyBeatFx(
+  b: BeatState,
+  cfg: VisualizerConfig,
+  stageEl: HTMLElement | null,
+  flashEl: HTMLDivElement | null,
+) {
+  if (cfg.shake && stageEl) {
+    const m = b.shake * 9;
+    const rx = (Math.random() * 2 - 1) * m;
+    const ry = (Math.random() * 2 - 1) * m;
+    // Slight scale so the shake never reveals the page edges.
+    stageEl.style.transform = `scale(1.035) translate(${rx.toFixed(1)}px, ${ry.toFixed(1)}px)`;
+  } else if (stageEl && stageEl.style.transform) {
+    stageEl.style.transform = "";
+  }
+  if (cfg.flash && flashEl) {
+    flashEl.style.opacity = String(Math.min(0.55, b.flash * 0.55));
+  } else if (flashEl && flashEl.style.opacity !== "0") {
+    flashEl.style.opacity = "0";
+  }
 }
 
 interface Particle { x: number; y: number; vy: number; r: number; a: number; }
@@ -509,19 +633,13 @@ function drawWaveform(
   ctx.globalAlpha = 1;
 }
 
-function drawCircular(
+/** Shared: drifting particles + a level-reactive centre glow. */
+function drawCircBackdrop(
   ctx: CanvasRenderingContext2D,
-  bars: number[],
   w: number, h: number, dpr: number,
-  cfg: VisualizerConfig,
-  particles: Particle[],
+  cx: number, cy: number, baseR: number, level: number,
+  cfg: VisualizerConfig, particles: Particle[],
 ) {
-  const cx = w / 2, cy = h / 2;
-  const baseR = Math.min(w, h) * 0.22;     // inner ring radius
-  const maxLen = Math.min(w, h) * 0.20;    // max bar length outward
-  const level = bars.reduce((s, v) => s + v, 0) / bars.length;
-
-  // Drifting background particles (cheap; updates in place).
   if (particles.length) {
     ctx.fillStyle = hexA(cfg.accent, 1);
     for (const p of particles) {
@@ -535,47 +653,222 @@ function drawCircular(
     ctx.globalAlpha = 1;
   }
 
-  // Pulsing glow ring behind the centre, scaled by overall level.
-  const glowR = baseR * (1.15 + level * 0.5);
+  const glowR = baseR * (1.2 + level * 0.6);
   const glow = ctx.createRadialGradient(cx, cy, baseR * 0.4, cx, cy, glowR);
   glow.addColorStop(0, hexA(cfg.accent, 0.0));
-  glow.addColorStop(0.7, hexA(cfg.accent, 0.10 + level * 0.18));
+  glow.addColorStop(0.7, hexA(cfg.accent, 0.10 + level * 0.20));
   glow.addColorStop(1, hexA(cfg.accent2, 0.0));
   ctx.fillStyle = glow;
   ctx.beginPath();
   ctx.arc(cx, cy, glowR, 0, Math.PI * 2);
   ctx.fill();
+}
 
-  // Radial bars. Mirror the spectrum across the vertical axis so the
-  // ring is symmetric (low freqs at top, fanning both ways).
-  const n = bars.length;
-  const barW = Math.max(2 * dpr, (Math.PI * 2 * baseR) / (n * 2) * 0.6);
-  ctx.lineWidth = barW;
-  ctx.lineCap = "round";
-  for (let i = 0; i < n; i++) {
-    const v = bars[i];
-    const len = baseR + v * maxLen;
-    // Two mirrored angles per bin → full ring.
-    for (const sign of [-1, 1]) {
-      const ang = -Math.PI / 2 + sign * (i / n) * Math.PI;
-      const x1 = cx + Math.cos(ang) * baseR;
-      const y1 = cy + Math.sin(ang) * baseR;
-      const x2 = cx + Math.cos(ang) * len;
-      const y2 = cy + Math.sin(ang) * len;
-      ctx.strokeStyle = hexA(mix(cfg.accent, cfg.accent2, v), 0.85);
-      ctx.beginPath();
-      ctx.moveTo(x1, y1);
-      ctx.lineTo(x2, y2);
-      ctx.stroke();
-    }
+/**
+ * Trap Nation style — a smooth, mirror-symmetric radial waveform that
+ * forms a continuous luminous "blob" around the cover, filled with a
+ * translucent gradient and a bright glowing edge. The base radius
+ * pulses gently with the overall level (bass response).
+ */
+function drawTrapNation(
+  ctx: CanvasRenderingContext2D,
+  bars: number[],
+  w: number, h: number, dpr: number,
+  cfg: VisualizerConfig,
+  particles: Particle[],
+) {
+  const cx = w / 2, cy = h / 2;
+  const level = bars.reduce((s, v) => s + v, 0) / bars.length;
+  const baseR = Math.min(w, h) * 0.22 * (1 + level * 0.12);  // stronger bass pulse
+  const maxLen = Math.min(w, h) * 0.22;
+  // cloudnation's signature is a SMOOTH blob, so average neighbouring
+  // bins before mapping them to radii (kills per-bar spikes).
+  const sm = smoothArray(bars, 1);
+  const n = sm.length;
+  const rot = (performance.now() / 1000) * 0.04;   // slow spin
+
+  drawCircBackdrop(ctx, w, h, dpr, cx, cy, baseR, level, cfg, particles);
+
+  // Symmetric value lookup: angle position 0..1 maps to a mirrored
+  // sweep over the bins (top = bin 0, fanning both ways), so the curve
+  // is left/right symmetric like the Trap Nation visualiser.
+  const valAt = (t: number): number => {
+    const x = t < 0.5 ? t * 2 : (1 - t) * 2;   // 0→1→0
+    const fi = x * (n - 1);
+    const i0 = Math.floor(fi);
+    const i1 = Math.min(n - 1, i0 + 1);
+    const f = fi - i0;
+    return sm[i0] * (1 - f) + sm[i1] * f;
+  };
+
+  const STEPS = 220;   // smooth closed curve
+  ctx.beginPath();
+  for (let s = 0; s <= STEPS; s++) {
+    const t = s / STEPS;
+    const ang = -Math.PI / 2 + (t + rot) * Math.PI * 2;
+    const r = baseR + valAt(t) * maxLen;
+    const x = cx + Math.cos(ang) * r;
+    const y = cy + Math.sin(ang) * r;
+    if (s === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
   }
+  ctx.closePath();
 
-  // Crisp inner ring outline.
-  ctx.lineWidth = 2 * dpr;
-  ctx.strokeStyle = hexA(cfg.accent, 0.5);
+  const fill = ctx.createRadialGradient(cx, cy, baseR, cx, cy, baseR + maxLen);
+  fill.addColorStop(0, hexA(cfg.accent, 0.32));
+  fill.addColorStop(1, hexA(cfg.accent2, 0.06));
+  ctx.fillStyle = fill;
+  ctx.fill();
+
+  ctx.lineJoin = "round";
+  // Bloom: wide translucent passes under the crisp edge for the
+  // signature Trap Nation glow.
+  ctx.lineWidth = 14 * dpr;
+  ctx.strokeStyle = hexA(cfg.accent, 0.10);
+  ctx.stroke();
+  ctx.lineWidth = 7 * dpr;
+  ctx.strokeStyle = hexA(cfg.accent, 0.18);
+  ctx.stroke();
+  // Crisp bright edge.
+  ctx.lineWidth = Math.max(2, dpr * 2.5);
+  ctx.strokeStyle = hexA(cfg.accent, 0.98);
+  ctx.stroke();
+
+  // Inner ring outline hugging the cover.
+  ctx.lineWidth = dpr * 1.5;
+  ctx.strokeStyle = hexA(cfg.accent, 0.4);
   ctx.beginPath();
   ctx.arc(cx, cy, baseR, 0, Math.PI * 2);
   ctx.stroke();
+}
+
+/**
+ * NCS style — the "NCS Spectrum" glowing ORB: several smooth, mirror-
+ * symmetric circular waveforms layered at slightly different radii and
+ * rotation phases, additively blended (globalCompositeOperation
+ * "lighter") so overlaps build a luminous translucent sphere with depth.
+ * Heavy bloom, no centre cover — the orb is the centrepiece. Matches the
+ * Roonil/NCS_Spectrum_GLava look (and the NCS sphere video).
+ */
+function drawNcs(
+  ctx: CanvasRenderingContext2D,
+  bars: number[],
+  w: number, h: number, dpr: number,
+  cfg: VisualizerConfig,
+  particles: Particle[],
+) {
+  const cx = w / 2, cy = h / 2;
+  const level = bars.reduce((s, v) => s + v, 0) / bars.length;
+  const R = Math.min(w, h) * 0.26;
+  const sm = smoothArray(bars, 2);   // soft NCS waveform
+  const n = sm.length;
+  const t = performance.now() / 1000;
+
+  drawCircBackdrop(ctx, w, h, dpr, cx, cy, R, level, cfg, particles);
+
+  // Mirror-symmetric value lookup with a rotation phase (so each layer
+  // spins independently → shimmering orb).
+  const valAt = (k: number, phase: number): number => {
+    let p = k + phase;
+    p -= Math.floor(p);                       // wrap 0..1
+    const x = p < 0.5 ? p * 2 : (1 - p) * 2;  // 0→1→0 (symmetric)
+    const fi = x * (n - 1);
+    const i0 = Math.floor(fi);
+    const i1 = Math.min(n - 1, i0 + 1);
+    const f = fi - i0;
+    return sm[i0] * (1 - f) + sm[i1] * f;
+  };
+  const STEPS = 200;
+  const trace = (rBase: number, amp: number, phase: number) => {
+    ctx.beginPath();
+    for (let s = 0; s <= STEPS; s++) {
+      const k = s / STEPS;
+      const ang = -Math.PI / 2 + k * Math.PI * 2;
+      const r = rBase + valAt(k, phase) * amp;
+      const x = cx + Math.cos(ang) * r;
+      const y = cy + Math.sin(ang) * r;
+      if (s === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+  };
+
+  // Soft orb body.
+  const body = ctx.createRadialGradient(cx, cy, R * 0.2, cx, cy, R * 1.1);
+  body.addColorStop(0, hexA(cfg.accent, 0.04 + level * 0.05));
+  body.addColorStop(1, hexA(cfg.accent, 0));
+  ctx.fillStyle = body;
+  ctx.beginPath();
+  ctx.arc(cx, cy, R * 1.1, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Additive layered flowing waveforms = glowing translucent sphere.
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  ctx.lineJoin = "round";
+  const layers = 5;
+  const amp = Math.min(w, h) * 0.075;
+  for (let l = 0; l < layers; l++) {
+    const phase = t * (0.06 + 0.03 * l) + l * 0.37;
+    const rBase = R * (0.80 + 0.05 * l);
+    const col = hexA(mix(cfg.accent, cfg.accent2, l / (layers - 1)), 0.16 + level * 0.10);
+    trace(rBase, amp * (1 - l * 0.08), phase);
+    ctx.lineWidth = (1.5 + l * 0.6) * dpr;
+    ctx.strokeStyle = col;
+    ctx.stroke();
+  }
+  // Bright crisp reactive rim on top.
+  trace(R, amp * 1.15, t * 0.05);
+  ctx.lineWidth = 2 * dpr;
+  ctx.strokeStyle = hexA(cfg.accent, 0.85);
+  ctx.stroke();
+  ctx.restore();
+}
+
+/**
+ * Monstercat style — full-width bottom bars with rounded tops, even
+ * spacing, a smooth vertical gradient and a glowing baseline. No
+ * reflection (kept clean).
+ */
+function drawMonstercat(
+  ctx: CanvasRenderingContext2D,
+  bars: number[],
+  w: number, h: number, dpr: number,
+  cfg: VisualizerConfig,
+  grad: CanvasGradient,
+) {
+  const gap = 3 * dpr;
+  const barW = (w - gap * (bars.length - 1)) / bars.length;
+  const radius = Math.min(barW / 2, 6 * dpr);
+  ctx.fillStyle = grad;
+  for (let i = 0; i < bars.length; i++) {
+    const barH = Math.max(2, bars[i] * h * 0.92);
+    const x = i * (barW + gap);
+    const y = h - barH;
+    roundedTopRect(ctx, x, y, barW, barH, radius);
+  }
+  // Glowing baseline.
+  ctx.fillStyle = hexA(cfg.accent, 0.55);
+  ctx.fillRect(0, h - 2 * dpr, w, 2 * dpr);
+}
+
+/** Rect with rounded top corners only (uses roundRect when available). */
+function roundedTopRect(
+  ctx: CanvasRenderingContext2D,
+  x: number, y: number, w: number, h: number, r: number,
+) {
+  const rr = Math.min(r, w / 2, h);
+  ctx.beginPath();
+  if (typeof (ctx as any).roundRect === "function") {
+    (ctx as any).roundRect(x, y, w, h, [rr, rr, 0, 0]);
+  } else {
+    ctx.moveTo(x, y + h);
+    ctx.lineTo(x, y + rr);
+    ctx.quadraticCurveTo(x, y, x + rr, y);
+    ctx.lineTo(x + w - rr, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + rr);
+    ctx.lineTo(x + w, y + h);
+    ctx.closePath();
+  }
+  ctx.fill();
 }
 
 // ===== Static CSS ================================================
@@ -715,18 +1008,17 @@ const baseCss = `
     display: block;
     z-index: 0;
   }
-  .circ-center {
-    position: absolute; inset: 0;
-    display: flex; flex-direction: column;
-    align-items: center; justify-content: center;
-    gap: 28px; z-index: 1; pointer-events: none;
-    text-align: center;
-  }
+  /* Cover diameter = 2 × the canvas inner-ring radius region. The ring
+     is pinned to the viewport centre to stay concentric with the
+     radial spectrum (drawn at canvas w/2, h/2). */
   .circ-cover-ring {
-    position: relative;
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
     width: min(26vw, 320px); height: min(26vw, 320px);
     border-radius: 50%;
     padding: 10px;
+    z-index: 1; pointer-events: none;
     background: radial-gradient(circle at 50% 50%, rgba(5,6,10,0.2), rgba(5,6,10,0.85));
     box-shadow:
       0 0 0 2px rgba(0,240,255,0.35) inset,
@@ -746,7 +1038,18 @@ const baseCss = `
     font-size: 80px; color: rgba(0,240,255,0.55);
     background: radial-gradient(circle at 50% 50%, rgba(0,240,255,0.15), rgba(5,6,10,0.95));
   }
-  .circ-meta { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+  /* Metadata sits below the cover ring (just past its radius) and is
+     centred horizontally. Anchored to viewport centre + cover radius so
+     it tracks the cover regardless of viewport size. */
+  .circ-meta {
+    position: absolute;
+    left: 50%;
+    top: calc(50% + min(13vw, 160px) + 26px);
+    transform: translateX(-50%);
+    z-index: 2; pointer-events: none;
+    display: flex; flex-direction: column; align-items: center; gap: 10px;
+    text-align: center; max-width: 86vw;
+  }
   .circ-meta .badge { margin: 0 auto; }
   .circ-title {
     font-size: clamp(2rem, 4vw, 3.6rem);
@@ -757,4 +1060,25 @@ const baseCss = `
   .circ-artist { font-size: clamp(1.1rem, 1.8vw, 1.5rem); color: rgba(230,247,255,0.82); }
   .stage-circular .station { bottom: 36px; left: 48px; }
   .stage-circular .clock { bottom: 36px; right: 48px; }
+
+  /* ----- Custom background + beat FX ----- */
+  .stage { will-change: transform; }
+  /* z-index:-2 sits over the stage's own gradient but behind everything
+     else (custom-bg → beat-flash → spectrum/content), so an uploaded
+     image becomes the backdrop without covering the spectrum. */
+  .custom-bg {
+    position: absolute; inset: 0;
+    z-index: -2; pointer-events: none;
+    background-size: cover; background-position: center; background-repeat: no-repeat;
+  }
+  /* The beat flash sits BEHIND the spectrum + cover + text (z-index:-1,
+     just above the background) so it pulses the BACKDROP only — it never
+     washes over the visualiser or the now-playing text. */
+  .beat-flash {
+    position: absolute; inset: 0;
+    z-index: -1; opacity: 0; pointer-events: none;
+    mix-blend-mode: screen;
+    transition: opacity 70ms linear;
+    will-change: opacity;
+  }
 `;

@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { appName } from "@/lib/app-name";
 
 export const metadata: Metadata = {
-  title: "CacheStream",
+  title: appName(),
   description: "Headless Twitch streaming control panel",
 };
 

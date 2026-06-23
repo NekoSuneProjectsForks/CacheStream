@@ -7,6 +7,7 @@
 
 const { BrowserWindow, Tray, Menu, shell, nativeImage, clipboard } = require("electron");
 const path = require("node:path");
+const { appName } = require("./app-name");
 
 function createPanelWindow(panelUrl) {
   const win = new BrowserWindow({
@@ -14,7 +15,7 @@ function createPanelWindow(panelUrl) {
     height: 860,
     minWidth: 900,
     minHeight: 600,
-    title: "CacheStream",
+    title: appName(),
     backgroundColor: "#0a0d18",
     autoHideMenuBar: true,
     webPreferences: {
@@ -28,6 +29,13 @@ function createPanelWindow(panelUrl) {
   });
 
   win.loadURL(`${panelUrl}/admin`);
+
+  // Debug builds (test.bat sets CS_DEVTOOLS=1) auto-open DevTools so the
+  // renderer console + network are visible while iterating. No effect in
+  // shipped builds where the env var is unset.
+  if (process.env.CS_DEVTOOLS === "1") {
+    win.webContents.openDevTools({ mode: "detach" });
+  }
 
   // Open external links (e.g. Twitch dashboard) in the OS browser,
   // not inside the app window.
@@ -58,10 +66,10 @@ function createTray({ getWindow, onQuit, lanPanelUrl = null, rtmpPushUrl = null 
     if (img.isEmpty()) return null;
 
     const tray = new Tray(img);
-    tray.setToolTip("CacheStream");
+    tray.setToolTip(appName());
 
     const template = [
-      { label: "Open CacheStream", click: () => { const w = getWindow(); if (w) { w.show(); w.focus(); } } },
+      { label: `Open ${appName()}`, click: () => { const w = getWindow(); if (w) { w.show(); w.focus(); } } },
     ];
     // LAN reachability — so you can open the panel from your phone or
     // point OBS at the ingest without hunting for the machine's IP.

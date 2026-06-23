@@ -1,6 +1,12 @@
-appId: com.cachenetworks.cachestream
-productName: CacheStream
-copyright: MIT — CacheNetworks
+# Branding is resolved from the repo at build time by scripts/eb.mjs
+# (run via `npm run dist`/`dist:win`/`dist:linux`/`pack:dir`), which sets
+# these env vars and writes src/app-name.json for the runtime title.
+# Rename the repo → installers, appId, publish target and title all
+# follow automatically (defaults to CacheStream). Do NOT call
+# electron-builder directly — go through the npm scripts so the env is set.
+appId: ${env.APP_ID}
+productName: ${env.APP_NAME}
+copyright: ${env.APP_COPYRIGHT}
 directories:
   output: dist
   buildResources: build
@@ -11,8 +17,8 @@ directories:
 # .blockmap files. The updater reads the latest GitHub Release here.
 publish:
   provider: github
-  owner: NekoSuneProjectsForks
-  repo: CacheStream
+  owner: ${env.GH_OWNER}
+  repo: ${env.GH_REPO}
   releaseType: release
 
 # What goes inside the app bundle (the asar). The Electron main
@@ -51,17 +57,17 @@ linux:
   target:
     - AppImage
     - deb
-  artifactName: CacheStream-${version}-linux-${arch}.${ext}
+  artifactName: ${productName}-${version}-linux-${arch}.${ext}
 
 win:
   target:
     - nsis
     - portable
-  # NSIS uses this name (CacheStream-x.y.z-win-x64.exe). The portable
+  # NSIS uses this name (<AppName>-x.y.z-win-x64.exe). The portable
   # target overrides its own name below — without that, BOTH produce
   # the same .exe filename, which collides and breaks publishing (you
   # end up with only the .blockmap uploaded, no installer + no latest.yml).
-  artifactName: CacheStream-${version}-win-${arch}.${ext}
+  artifactName: ${productName}-${version}-win-${arch}.${ext}
 
 nsis:
   oneClick: false
@@ -69,4 +75,4 @@ nsis:
   allowToChangeInstallationDirectory: true
 
 portable:
-  artifactName: CacheStream-${version}-win-${arch}-portable.${ext}
+  artifactName: ${productName}-${version}-win-${arch}-portable.${ext}

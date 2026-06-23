@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./scene.css";
+import { appName } from "@/lib/app-name";
 
 /**
  * The scene that gets streamed.
@@ -10,7 +11,7 @@ import "./scene.css";
  * more scenes (see the data-scene attribute pattern).
  */
 export const metadata: Metadata = {
-  title: "CacheStream :: live",
+  title: `${appName()} :: live`,
 };
 
 export default function ScenePage() {

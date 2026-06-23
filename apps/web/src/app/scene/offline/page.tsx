@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { SceneFrame } from "../_shared/SceneFrame";
+import { appName } from "@/lib/app-name";
 
-export const metadata: Metadata = { title: "CacheStream :: offline" };
+export const metadata: Metadata = { title: `${appName()} :: offline` };
 export const dynamic = "force-dynamic";
 
 /**

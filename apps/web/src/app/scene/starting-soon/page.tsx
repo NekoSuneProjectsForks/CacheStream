@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
 import { SceneFrame } from "../_shared/SceneFrame";
 import { Countdown } from "../_shared/Countdown";
+import { appName } from "@/lib/app-name";
 
-export const metadata: Metadata = { title: "CacheStream :: starting soon" };
+export const metadata: Metadata = { title: `${appName()} :: starting soon` };
 export const dynamic = "force-dynamic";
 
 /**

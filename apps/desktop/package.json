@@ -22,10 +22,11 @@
     "dev": "electron .",
     "rebuild": "electron-rebuild -f -w better-sqlite3 -m ../web",
     "prepack-app": "node scripts/sync-streamer.mjs && node scripts/build-web.mjs",
-    "pack:dir": "npm run prepack-app && electron-builder --dir",
-    "dist": "npm run prepack-app && electron-builder",
-    "dist:linux": "npm run prepack-app && electron-builder --linux --x64 --arm64",
-    "dist:win": "npm run prepack-app && electron-builder --win --x64 --arm64"
+    "app-meta": "node scripts/app-meta.mjs",
+    "pack:dir": "npm run prepack-app && node scripts/eb.mjs --dir",
+    "dist": "npm run prepack-app && node scripts/eb.mjs",
+    "dist:linux": "npm run prepack-app && node scripts/eb.mjs --linux --x64 --arm64",
+    "dist:win": "npm run prepack-app && node scripts/eb.mjs --win --x64 --arm64"
   },
   "engines": {
     "node": ">=20.0.0"

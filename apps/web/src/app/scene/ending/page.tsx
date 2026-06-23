@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
 import { SceneFrame } from "../_shared/SceneFrame";
 import { SocialRow } from "../_shared/SocialRow";
+import { appName } from "@/lib/app-name";
 
-export const metadata: Metadata = { title: "CacheStream :: ending" };
+export const metadata: Metadata = { title: `${appName()} :: ending` };
 export const dynamic = "force-dynamic";
 
 /**

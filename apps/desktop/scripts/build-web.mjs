@@ -11,11 +11,12 @@
 //   build/web/.next/static/...        (client assets)
 //   build/web/public/...
 
-import { existsSync, rmSync, mkdirSync, cpSync } from "node:fs";
+import { existsSync, rmSync, mkdirSync, cpSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { rebuildSqlite } from "./native.mjs";
+import { resolveAppMeta } from "./app-meta.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const desktopDir = join(here, "..");
@@ -65,6 +66,21 @@ if (existsSync(join(webDir, "public"))) {
   cpSync(join(webDir, "public"), join(stage, "public"), { recursive: true });
 }
 console.log("[build-web] staged web standalone → build/web");
+
+// Rename the staged web bundle's package.json `name` to the repo-derived
+// slug (source package.json is untouched). Keeps the bundled panel's
+// identity consistent with the desktop app name. Internal only.
+try {
+  const pkgPath = join(stage, "package.json");
+  if (existsSync(pkgPath)) {
+    const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
+    pkg.name = `${resolveAppMeta().slug}-web`;
+    writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
+    console.log(`[build-web] staged package.json name → ${pkg.name}`);
+  }
+} catch (err) {
+  console.warn("[build-web] could not rename staged package.json:", err.message);
+}
 
 // 4. Rebuild the staged better-sqlite3 against Electron's ABI and
 //    stamp the version marker (see scripts/native.mjs). Without this
