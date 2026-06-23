@@ -109,13 +109,17 @@ export function OverlayConfigCard() {
       {busy && <div className="muted" style={{ fontSize: 11, marginTop: 8 }}>saving…</div>}
       {error && <div className="error" style={{ marginTop: 8 }}>⚠ {error}</div>}
 
-      <style jsx>{`
+      {/* global (not scoped): the switch + corner buttons are rendered by
+          the <Row> child component, so styled-jsx's per-component scoping
+          wouldn't reach them. Everything is namespaced under .overlay-grid
+          so nothing leaks to other cards. */}
+      <style jsx global>{`
         .overlay-grid {
           display: grid;
           gap: 14px;
           margin-top: .5rem;
         }
-        .ovl-row {
+        .overlay-grid .ovl-row {
           display: grid;
           grid-template-columns: auto 1fr auto;
           gap: 14px;
@@ -123,55 +127,77 @@ export function OverlayConfigCard() {
           padding: 12px 14px;
           background: rgba(0,0,0,.18);
           border: 1px solid var(--line);
-          border-radius: 4px;
+          border-radius: 6px;
+          transition: border-color .12s ease, background .12s ease;
         }
-        .ovl-desc {
-          color: var(--text-dim);
-          font-size: 12px;
-        }
-        .ovl-title {
-          font-weight: 700;
-          margin-bottom: 2px;
-        }
-        .ovl-corner {
-          display: flex; gap: 4px;
-          flex-wrap: nowrap;
-        }
-        .ovl-corner button {
-          font-size: 10px;
-          letter-spacing: .14em;
-          text-transform: uppercase;
-          padding: 4px 8px;
-          border: 1px solid var(--line);
+        .overlay-grid .ovl-row:hover { border-color: rgba(0,240,255,.25); }
+        .overlay-grid .ovl-desc { color: var(--text-dim); font-size: 12px; }
+        .overlay-grid .ovl-title { font-weight: 700; margin-bottom: 2px; }
+
+        /* ----- Corner picker: a 2×2 grid that maps to the screen ----- */
+        .overlay-grid .ovl-corner {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 3px;
+          width: 66px;
+          padding: 3px;
+          border-radius: 7px;
           background: rgba(0,0,0,.3);
-          color: var(--text-dim);
-          border-radius: 3px;
+          border: 1px solid var(--line);
+        }
+        .overlay-grid .ovl-corner button {
+          font-size: 9px;
+          font-weight: 700;
+          letter-spacing: .08em;
+          padding: 6px 0;
+          border: 1px solid transparent;
+          background: rgba(255,255,255,.04);
+          color: var(--text-mute);
+          border-radius: 4px;
           cursor: pointer;
+          transition: background .12s ease, color .12s ease, box-shadow .12s ease;
         }
-        .ovl-corner button.active {
-          color: var(--cs-accent-solid, #00f0ff);
+        .overlay-grid .ovl-corner button:hover:not(:disabled):not(.active) {
+          background: rgba(0,240,255,.10);
+          color: var(--text);
+        }
+        .overlay-grid .ovl-corner button.active {
+          color: #021018;
+          background: var(--cs-accent-solid, #00f0ff);
           border-color: var(--cs-accent-solid, #00f0ff);
-          background: rgba(0,240,255,0.08);
+          box-shadow: 0 0 10px rgba(0,240,255,.45);
         }
-        .switch {
+        .overlay-grid .ovl-corner button:disabled {
+          opacity: .4;
+          cursor: not-allowed;
+        }
+
+        /* ----- Toggle switch ----- */
+        .overlay-grid .switch {
+          -webkit-appearance: none;
           appearance: none;
-          width: 38px; height: 20px;
-          background: rgba(255,255,255,0.12);
+          margin: 0;
+          width: 40px; height: 22px;
+          background: rgba(255,255,255,0.14);
           border-radius: 999px;
           position: relative;
           cursor: pointer;
+          flex: none;
           transition: background .15s ease;
         }
-        .switch:checked { background: var(--cs-accent-solid, #00f0ff); }
-        .switch::after {
+        .overlay-grid .switch:checked {
+          background: var(--cs-accent-solid, #00f0ff);
+          box-shadow: 0 0 10px rgba(0,240,255,.4);
+        }
+        .overlay-grid .switch::after {
           content: "";
           position: absolute;
-          width: 16px; height: 16px; border-radius: 50%;
+          width: 18px; height: 18px; border-radius: 50%;
           background: #fff;
           top: 2px; left: 2px;
           transition: left .15s ease;
         }
-        .switch:checked::after { left: 20px; }
+        .overlay-grid .switch:checked::after { left: 20px; }
       `}</style>
     </section>
   );

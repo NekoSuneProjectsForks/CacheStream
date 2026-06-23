@@ -92,6 +92,18 @@ function createApi({ streamer, config, logger }) {
       ).catch((err) => send(res, 400, { error: err.message }));
     }
 
+    // Multistream targets (restream.io-style). Only on streamers that
+    // implement setTargets (the desktop streamer).
+    if (req.method === "POST" && url.pathname === "/targets") {
+      if (typeof streamer.setTargets !== "function") {
+        return send(res, 404, { error: "not_supported" });
+      }
+      return readJson(req).then((body) =>
+        streamer.setTargets(body?.targets || [])
+          .then(() => send(res, 200, streamer.status()))
+      ).catch((err) => send(res, 400, { error: err.message }));
+    }
+
     send(res, 404, { error: "not_found" });
   });
 

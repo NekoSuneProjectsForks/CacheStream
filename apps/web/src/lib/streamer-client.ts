@@ -152,6 +152,9 @@ export const streamer = {
    */
   setIngest: (input: { streamKey?: string | null; ingestUrl?: string | null }) =>
     call<StreamerStatus>("POST", "/ingest", input),
+  /** Multistream targets (restream.io-style multi-RTMP fan-out). */
+  setTargets: (targets: Array<{ ingestUrl: string; streamKey: string; label?: string }>) =>
+    call<StreamerStatus>("POST", "/targets", { targets }),
 };
 
 /** Returns null instead of throwing — useful for status polling. */

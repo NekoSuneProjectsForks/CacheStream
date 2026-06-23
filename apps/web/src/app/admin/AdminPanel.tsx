@@ -22,6 +22,8 @@ import { GamesTab } from "./tabs/GamesTab";
 import { BrandingTab } from "./tabs/BrandingTab";
 import { SourcesTab } from "./tabs/SourcesTab";
 import { StaffTab } from "./tabs/StaffTab";
+import { ConnectionsTab } from "./tabs/ConnectionsTab";
+import { MultistreamTab } from "./tabs/MultistreamTab";
 
 interface SessionInfo { login: string; displayName: string }
 interface BrandingSnapshot {
@@ -48,7 +50,7 @@ interface Props {
 type TabKey =
   | "status" | "studio" | "scenes" | "sources" | "info" | "chat"
   | "commands" | "alerts" | "music" | "visualizer" | "vods" | "games"
-  | "branding" | "staff";
+  | "connections" | "multistream" | "branding" | "staff";
 
 /**
  * `ownerOnly` tabs are hidden from moderators. Mods still get
@@ -69,6 +71,8 @@ const TABS: Array<{ key: TabKey; label: string; ownerOnly?: boolean }> = [
   { key: "visualizer", label: "Visualizer" },
   { key: "vods",     label: "VODs" },
   { key: "games",    label: "Games" },
+  { key: "connections", label: "Connections", ownerOnly: true },
+  { key: "multistream", label: "Multistream", ownerOnly: true },
   { key: "branding", label: "Branding", ownerOnly: true },
   { key: "staff",    label: "Staff",    ownerOnly: true },
 ];
@@ -168,6 +172,8 @@ export function AdminPanel(props: Props) {
         {tab === "visualizer" && <VisualizerTab />}
         {tab === "vods"       && <VodsTab />}
         {tab === "games"    && <GamesTab />}
+        {tab === "connections" && props.role === "owner" && <ConnectionsTab />}
+        {tab === "multistream" && props.role === "owner" && <MultistreamTab />}
         {tab === "branding" && props.role === "owner" && <BrandingTab initial={props.branding} />}
         {tab === "staff"    && props.role === "owner" && <StaffTab />}
       </div>

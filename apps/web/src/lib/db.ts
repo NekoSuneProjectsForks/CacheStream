@@ -321,6 +321,37 @@ const SCHEMA_VERSIONS: Array<(db: Database.Database) => void> = [
       );
     `);
   },
+
+  // v+1 — Multi-platform accounts (Twitch/Kick/YouTube/VPzone). One row
+  // per linked platform identity + a per-platform active token set. The
+  // legacy Twitch singletons (owner / oauth_tokens) keep working; new
+  // providers live here. extra_json carries per-platform bits like Kick's
+  // chatroom id.
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS platform_links (
+        platform          TEXT NOT NULL,        -- 'twitch'|'kick'|'youtube'|'vpzone'
+        platform_user_id  TEXT NOT NULL,
+        login             TEXT,
+        display_name      TEXT,
+        avatar_url        TEXT,
+        extra_json        TEXT NOT NULL DEFAULT '{}',
+        scopes_json       TEXT NOT NULL DEFAULT '[]',
+        linked_at         INTEGER NOT NULL,
+        PRIMARY KEY (platform, platform_user_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS platform_tokens (
+        platform          TEXT PRIMARY KEY,     -- one active token set per platform
+        access_token      TEXT NOT NULL,
+        refresh_token     TEXT,
+        expires_at        INTEGER NOT NULL,
+        scopes_json       TEXT NOT NULL DEFAULT '[]',
+        platform_user_id  TEXT,
+        updated_at        INTEGER NOT NULL
+      );
+    `);
+  },
 ];
 
 function applySchema(db: Database.Database): void {

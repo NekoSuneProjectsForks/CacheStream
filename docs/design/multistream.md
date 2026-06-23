@@ -55,7 +55,49 @@ Limitations (acceptable for phase 1):
   ≤4s; we already use GOP = 2×fps, so fine.
 - No per-target transcode (e.g. a 720p Kick + 1080p Twitch). That's phase 2.
 
-### 3.2 Phase 2 — Per-target processes (independent encodes) — OPTIONAL
+### 3.1b Phase 1.5 — HOT per-target toggle (restream.io-style) — REQUESTED
+
+The tee muxer (3.1) is one process, so adding/removing a target restarts the
+whole pipeline (all outputs blip together). To turn a target on/off **live
+without dropping the others** (e.g. keep Twitch up while toggling Kick), each
+target must be its own process fed by a shared local relay:
+
+- **Shared local relay**: the primary FFmpeg publishes its encoded A/V once to
+  the embedded node-media-server on a reserved internal app:
+  `rtmp://127.0.0.1:<rtmpPort>/cs-multi/main`. `ingest.js` skips HLS + status
+  tracking for the `cs-multi` app so it doesn't pollute ingest status / the
+  safety watcher.
+- **Per-target relay processes**: for each enabled target, spawn
+  `ffmpeg -i rtmp://127.0.0.1:<rtmpPort>/cs-multi/main -c copy <out>` (copy =
+  no re-encode, cheap). Per-target reconnect with backoff (the feed may lag the
+  primary at start).
+- **Hot toggle**: enabling a target spawns just its relay; disabling kills just
+  that process. Primary + other relays are untouched → no restart. (`setTargets`
+  does a `_syncRelays()` diff; only the direct↔relay mode transition — first
+  target added / last removed — restarts the primary once.)
+- **Mode**: relay mode is active whenever ≥1 target is configured; with zero
+  targets it stays on the legacy single direct output (unchanged reliability for
+  simple single-Twitch users).
+- **Protocols** (per target, via the relay's output muxer — copy, so codec is
+  whatever the primary encoded, H.264/AAC):
+  - `rtmp`/`rtmps`: `-f flv -rtmp_live live <ingestUrl>/<key>`
+  - `srt`: `-f mpegts <srt://…>`
+  - `rtsp`: `-f rtsp -rtsp_transport tcp <rtsp://…>`
+  - `mpegts`/`udp`: `-f mpegts <udp://… | file>`
+  - `custom`: user-supplied `-f <muxer> <url>`
+  - `whep`/`ftl`: **not supported** by FFmpeg copy (WebRTC egress / deprecated
+    Mixer protocol) — needs an external bridge; shown as unavailable.
+- **Status dots**: the relay manager tracks each target's process state
+  (running / reconnecting / failed) → surfaced in `status()` for the UI.
+- **Wiring**: pass `rtmpPort` to `DesktopStreamer` (main.js); add `protocol` +
+  `format` to the `StreamTarget` model + UI; relay manager
+  (`_syncRelays`/`_spawnRelay`/`_relayArgs`) in `desktop-streamer.js`.
+
+This is an isolated change to the streaming core — implement + test it on its
+own (it can break streaming if the local-relay assumptions are off), separate
+from the rest of the multistream UI which already works against the tee path.
+
+### 3.2 Phase 2 — Per-target processes (independent ENCODES) — OPTIONAL
 
 For targets needing different settings or hard isolation, spawn one extra FFmpeg
 per such target, each reading the **same already-encoded** feed and either

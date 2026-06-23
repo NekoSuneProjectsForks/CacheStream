@@ -61,11 +61,21 @@ export interface VisualizerConfig {
   /** Custom background image URL ("" = the built-in gradient). May be an
    *  absolute http(s) URL or a same-origin path like /api/music/background. */
   background: string;
-  /** Beat-reactive full-screen flash overlay (vizzy-style). */
+  /** Beat-reactive background flash (the scrim lifts on the beat). */
   flash: boolean;
   /** Beat-reactive screen shake (vizzy-style). */
   shake: boolean;
+  /** Background dim 0–0.85 — the resting scrim darkness over the bg. */
+  bgDim: number;
+  /** Background blur in px (0–20) applied to a custom background image. */
+  bgBlur: number;
+  /** How the custom background image fits the screen. */
+  bgFit: "cover" | "contain" | "tile";
+  /** Beat FX strength multiplier (0.3–1.5) — scales flash dip + shake. */
+  beatIntensity: number;
 }
+
+export const BG_FITS: VisualizerConfig["bgFit"][] = ["cover", "contain", "tile"];
 
 export const VISUALIZER_DEFAULTS: VisualizerConfig = {
   layout: "bars",
@@ -76,10 +86,14 @@ export const VISUALIZER_DEFAULTS: VisualizerConfig = {
   fps: 30,
   mirror: true,
   particles: true,
-  showVinyl: true,
+  showVinyl: false,
   background: "",
   flash: false,
   shake: false,
+  bgDim: 0.45,
+  bgBlur: 0,
+  bgFit: "cover",
+  beatIntensity: 1,
 };
 
 const HEX = /^#[0-9a-fA-F]{6}$/;
@@ -117,5 +131,9 @@ export function normalizeVisualizer(parsed: any): VisualizerConfig {
   }
   if (typeof parsed.flash === "boolean") out.flash = parsed.flash;
   if (typeof parsed.shake === "boolean") out.shake = parsed.shake;
+  out.bgDim = clampNum(parsed.bgDim, 0, 0.85, VISUALIZER_DEFAULTS.bgDim);
+  out.bgBlur = clampNum(parsed.bgBlur, 0, 20, VISUALIZER_DEFAULTS.bgBlur);
+  if (BG_FITS.includes(parsed.bgFit)) out.bgFit = parsed.bgFit;
+  out.beatIntensity = clampNum(parsed.beatIntensity, 0.3, 1.5, VISUALIZER_DEFAULTS.beatIntensity);
   return out;
 }

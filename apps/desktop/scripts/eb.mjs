@@ -34,21 +34,25 @@ writeFileSync(
   }, null, 2) + "\n",
 );
 
-const env = {
-  ...process.env,
-  APP_NAME: meta.productName,
-  APP_ID: meta.appId,
-  GH_OWNER: meta.owner,
-  GH_REPO: meta.repo,
-  APP_COPYRIGHT: meta.copyright,
-};
-
-// Inject the repo-derived npm `name` into the PACKAGED app's package.json
-// (build output only — the source package.json files are untouched, since
-// JSON can't interpolate env and rewriting tracked files at build time is
-// dirty). This makes the shipped app's name follow the repo too.
-const forwarded = [
+// electron-builder does NOT expand ${env.X} inside the config file, so the
+// resolved branding is applied as CLI config OVERRIDES (-c.key=value). These
+// win over the static defaults in electron-builder.yml. artifactName's
+// ${productName} macro then resolves to the overridden productName.
+// (Values are repo names / appIds / owners — no spaces — so they're safe as
+// bare `-c.x=value` args on both bash and the Windows .cmd shim. Copyright
+// has spaces, so it stays the static `MIT` in the yml.)
+const overrides = [
+  `-c.productName=${meta.productName}`,
+  `-c.appId=${meta.appId}`,
+  `-c.publish.provider=github`,
+  `-c.publish.owner=${meta.owner}`,
+  `-c.publish.repo=${meta.repo}`,
+  // Repo-derived npm `name` in the PACKAGED app's package.json (build output
+  // only; source package.json untouched) → app.getName()/userData follow it.
   `-c.extraMetadata.name=${meta.slug}`,
+];
+const forwarded = [
+  ...overrides,
   ...process.argv.slice(2),   // e.g. --win --x64 --publish never
 ];
 const win = process.platform === "win32";
@@ -57,7 +61,8 @@ const bin = join(desktopDir, "node_modules", ".bin", win ? "electron-builder.cmd
 const r = spawnSync(bin, forwarded, {
   cwd: desktopDir,
   stdio: "inherit",
-  env,
+  // Inherit process.env (GH_TOKEN / GITHUB_* for publishing). No ${env.X}
+  // is read from the yml anymore — branding comes via -c overrides above.
   shell: win,   // needed to invoke the .cmd shim on Windows
 });
 process.exit(r.status ?? 1);

@@ -51,6 +51,7 @@ export function StudioTab() {
   const [showThirds, setShowThirds] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [safety, setSafety] = useState<{ enabled: boolean; sceneUrl: string }>({ enabled: false, sceneUrl: "" });
 
   // ---- Auto-fit canvas to its container --------------------------
   const canvasWrapRef = useRef<HTMLDivElement | null>(null);
@@ -87,6 +88,25 @@ export function StudioTab() {
   }, [previewSceneUrl]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Disconnect-safety config (auto-switch scene when the RTMP ingest drops).
+  useEffect(() => {
+    (async () => {
+      try { setSafety(await apiJson("/api/safety")); } catch {}
+    })();
+  }, []);
+  const updateSafety = async (patch: Partial<{ enabled: boolean; sceneUrl: string }>) => {
+    const next = { ...safety, ...patch };
+    setSafety(next);
+    try {
+      const r = await apiJson("/api/safety", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      setSafety(r);
+    } catch (e: any) { setError(e.message); }
+  };
 
   useEffect(() => {
     const id = setInterval(async () => {
@@ -220,11 +240,13 @@ export function StudioTab() {
         text: type === "text" ? "Live" : undefined,
         html: type === "html" ? "<div>HTML</div>" : undefined,
         src:
-          type === "image" ? "" :
-          type === "chat"  ? "http://web:7788/widgets/chat" :
-          type === "alert" ? "http://web:7788/widgets/alert" :
+          type === "image"      ? "" :
+          type === "chat"       ? "http://web:7788/widgets/chat" :
+          type === "alert"      ? "http://web:7788/widgets/alert" :
+          type === "nowplaying" ? "http://web:7788/widgets/nowplaying" :
           undefined,
-        _x: 80, _y: 80, _w: 420, _h: type === "chat" ? 320 : 140,
+        _x: 80, _y: 80, _w: type === "nowplaying" ? 380 : 420,
+        _h: type === "chat" ? 320 : type === "nowplaying" ? 96 : 140,
       },
     ]);
     setSelectedId(id);
@@ -411,6 +433,7 @@ export function StudioTab() {
                 <button className="btn-ghost sm" onClick={() => addLayer("image")}>＋ Image</button>
                 <button className="btn-ghost sm" onClick={() => addLayer("chat")}>＋ Chat</button>
                 <button className="btn-ghost sm" onClick={() => addLayer("alert")}>＋ Alert</button>
+                <button className="btn-ghost sm" onClick={() => addLayer("nowplaying")}>＋ Now Playing</button>
               </div>
             </div>
 
@@ -479,7 +502,43 @@ export function StudioTab() {
         </div>
       </section>
 
+      {/* ============ Disconnect safety ============ */}
+      <section className="card safety-card">
+        <div className="row gap" style={{ flexWrap: "wrap", alignItems: "center" }}>
+          <label className="row" style={{ gap: 8, alignItems: "center" }}>
+            <input
+              type="checkbox"
+              checked={safety.enabled}
+              onChange={(e) => updateSafety({ enabled: e.target.checked })}
+            />
+            <span className="studio-label" style={{ margin: 0 }}>SAFETY ON INGEST DROP</span>
+          </label>
+
+          <select
+            className="input"
+            value={safety.sceneUrl}
+            onChange={(e) => updateSafety({ sceneUrl: e.target.value })}
+            style={{ minWidth: 240 }}
+            disabled={!safety.enabled}
+          >
+            <option value="">— pick a safety scene —</option>
+            {scenes.map((s) => <option key={s.id} value={s.url}>{s.name}</option>)}
+          </select>
+
+          <span className="muted" style={{ fontSize: ".75rem", flex: 1, minWidth: 220 }}>
+            Auto-switches the program to this scene if a live RTMP publisher
+            disconnects, and switches back when it reconnects.
+          </span>
+        </div>
+        {safety.enabled && !safety.sceneUrl && (
+          <p className="hint" style={{ color: "var(--err)", marginTop: 8 }}>
+            Pick a safety scene above, or the auto-switch won’t fire.
+          </p>
+        )}
+      </section>
+
       <style jsx>{`
+        :global(.safety-card) { padding: 0.85rem 1.1rem; }
         :global(.studio-toolbar) { padding: 0.85rem 1.1rem; }
         .studio-label {
           color: var(--text-mute);
@@ -711,6 +770,7 @@ function labelFor(o: MoveableOverlay): string {
   if (o.type === "image") return o.src || "(image)";
   if (o.type === "chat")  return "Live chat";
   if (o.type === "alert") return "Alert feed";
+  if (o.type === "nowplaying") return "Now Playing";
   if (o.type === "html")  return (o.html || "").slice(0, 40) || "(html)";
   return o.type;
 }
@@ -722,6 +782,7 @@ function iconFor(t: Overlay["type"]): string {
     case "image": return "▣";
     case "chat":  return "💬";
     case "alert": return "★";
+    case "nowplaying": return "♫";
     default:      return "·";
   }
 }

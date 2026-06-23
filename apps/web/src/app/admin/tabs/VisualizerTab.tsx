@@ -6,6 +6,7 @@ import {
   VISUALIZER_DEFAULTS,
   VISUALIZER_LAYOUTS,
   VISUALIZER_LAYOUT_LABELS,
+  BG_FITS,
   type VisualizerConfig,
 } from "@/lib/visualizer-config";
 
@@ -120,6 +121,24 @@ export function VisualizerTab() {
           </label>
 
           <label className="vis-field">
+            <span className="vis-label">Beat strength <span className="mono">{vis.beatIntensity.toFixed(2)}×</span></span>
+            <input type="range" min={0.3} max={1.5} step={0.05} value={vis.beatIntensity}
+                   onChange={(e) => updateVis({ beatIntensity: Number(e.target.value) })} />
+          </label>
+
+          <label className="vis-field">
+            <span className="vis-label">Background dim <span className="mono">{Math.round(vis.bgDim * 100)}%</span></span>
+            <input type="range" min={0} max={0.85} step={0.05} value={vis.bgDim}
+                   onChange={(e) => updateVis({ bgDim: Number(e.target.value) })} />
+          </label>
+
+          <label className="vis-field">
+            <span className="vis-label">Background blur <span className="mono">{vis.bgBlur}px</span></span>
+            <input type="range" min={0} max={20} step={1} value={vis.bgBlur}
+                   onChange={(e) => updateVis({ bgBlur: Number(e.target.value) })} />
+          </label>
+
+          <label className="vis-field">
             <span className="vis-label">Accent</span>
             <input type="color" className="vis-color" value={vis.accent}
                    onChange={(e) => updateVis({ accent: e.target.value })} />
@@ -174,6 +193,10 @@ export function VisualizerTab() {
               onChange={(e) => setVis({ ...vis, background: e.target.value })}
               onBlur={(e) => updateVis({ background: e.target.value.trim() })}
             />
+            <select className="input" value={vis.bgFit} title="Image fit"
+                    onChange={(e) => updateVis({ bgFit: e.target.value as VisualizerConfig["bgFit"] })}>
+              {BG_FITS.map((f) => <option key={f} value={f}>{f}</option>)}
+            </select>
             <button className="btn-ghost sm" disabled={!!busy}
                     onClick={() => bgInputRef.current?.click()}>
               {busy === "bg" ? "…" : "Upload"}
@@ -204,7 +227,10 @@ export function VisualizerTab() {
           ~5s cadence as the broadcast; hit Reload to refresh immediately.
         </p>
         <div className="vis-preview-frame">
-          <iframe key={previewKey} src="/scene/music" title="Music scene preview" />
+          {/* ?preview=1 makes the scene play audio audibly here so you can
+              confirm music is running. The streamer's scene URL has no such
+              param, so the broadcast stays silent (ffmpeg audio only). */}
+          <iframe key={previewKey} src="/scene/music?preview=1" title="Music scene preview" />
         </div>
       </section>
 

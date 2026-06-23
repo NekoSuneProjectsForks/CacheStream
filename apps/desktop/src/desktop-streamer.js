@@ -66,7 +66,7 @@ function overlayInjector(containerId, overlays) {
       img.style.maxWidth = o.width || "auto";
       img.style.maxHeight = o.height || "auto";
       el.appendChild(img);
-    } else if ((o.type === "chat" || o.type === "alert") && o.src) {
+    } else if ((o.type === "chat" || o.type === "alert" || o.type === "nowplaying") && o.src) {
       const iframe = document.createElement("iframe");
       iframe.src = o.src; iframe.style.border = "0";
       iframe.style.width = o.width || "420px";
@@ -224,6 +224,38 @@ class DesktopStreamer extends EventEmitter {
     }
   }
 
+  /**
+   * Multistream targets (restream.io-style). `targets` is an array of
+   * { ingestUrl, streamKey, label, enabled }. When 2+ enabled targets
+   * exist the pipeline fans out via FFmpeg's `tee` muxer; with 0–1 it
+   * behaves exactly as the legacy single Twitch output. Hot-restarts if
+   * the effective set changed while running.
+   */
+  async setTargets(targets) {
+    const next = Array.isArray(targets) ? targets : [];
+    const before = JSON.stringify(this._outputTargets());
+    this.config.targets = next;
+    const after = JSON.stringify(this._outputTargets());
+    if (before !== after) {
+      this.logger.info({ count: this._outputTargets().length }, "multistream targets updated");
+      if (this.state === "running" || this.state === "reconnecting") await this.restart();
+    }
+  }
+
+  /**
+   * The effective RTMP outputs. Enabled targets with a key win; otherwise
+   * we fall back to the legacy single Twitch target so behaviour is
+   * unchanged when multistream isn't configured.
+   */
+  _outputTargets() {
+    const list = Array.isArray(this.config.targets) ? this.config.targets : [];
+    const enabled = list.filter((t) => t && t.enabled !== false && t.streamKey && t.ingestUrl);
+    if (enabled.length) {
+      return enabled.map((t) => ({ ingestUrl: t.ingestUrl, streamKey: t.streamKey, label: t.label || "" }));
+    }
+    return [{ ingestUrl: this.config.twitch.ingestUrl, streamKey: this.config.twitch.streamKey, label: "Twitch" }];
+  }
+
   // ---- VOD ------------------------------------------------------
 
   async playVod(source) {
@@ -340,9 +372,19 @@ class DesktopStreamer extends EventEmitter {
   }
 
   _spawnFFmpeg() {
-    const { video, audio, twitch } = this.config;
-    const rtmpUrl = `${twitch.ingestUrl}/${twitch.streamKey}`;
-    const safeUrl = `${twitch.ingestUrl}/***`;
+    const { video, audio } = this.config;
+    // Multistream: one tee output per enabled target (>=2), else the
+    // legacy single RTMP output. `onfail=ignore` so one dead target can't
+    // drop the others.
+    const targets = this._outputTargets();
+    const safeUrl = targets.map((t) => `${t.ingestUrl}/***`).join(", ");
+    const outputArgs = targets.length <= 1
+      ? ["-f", "flv", "-rtmp_live", "live", "-flvflags", "no_duration_filesize",
+         `${targets[0].ingestUrl}/${targets[0].streamKey}`]
+      : ["-f", "tee",
+         targets
+           .map((t) => `[f=flv:onfail=ignore:rtmp_live=live:flvflags=no_duration_filesize]${t.ingestUrl}/${t.streamKey}`)
+           .join("|")];
     const logLevel = process.env.STREAM_FFMPEG_LOGLEVEL || "warning";
     // Offscreen 'paint' events don't fire at perfectly even intervals,
     // so the wallclock-stamped frames have jittery PTS. Twitch's
@@ -380,8 +422,7 @@ class DesktopStreamer extends EventEmitter {
 
       "-c:a", "aac", "-b:a", `${audio.bitrateKbps}k`, "-ar", "44100", "-ac", "2",
 
-      "-f", "flv", "-rtmp_live", "live", "-flvflags", "no_duration_filesize",
-      rtmpUrl,
+      ...outputArgs,
     ];
 
     this.logger.debug({ url: safeUrl, codec: video.codec }, "spawning ffmpeg");
@@ -401,8 +442,8 @@ class DesktopStreamer extends EventEmitter {
     }, INGEST_GRACE_MS);
     this.ffmpeg.once("exit", () => clearTimeout(graceTimer));
 
-    const streamKey = twitch.streamKey || "";
-    const redact = (s) => streamKey ? s.split(streamKey).join("***") : s;
+    const keys = targets.map((t) => t.streamKey).filter(Boolean);
+    const redact = (s) => keys.reduce((acc, k) => acc.split(k).join("***"), s);
     this.ffmpeg.stderr.on("data", (chunk) => {
       const line = redact(chunk.toString().trim());
       if (!line) return;

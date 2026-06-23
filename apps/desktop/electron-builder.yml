@@ -1,24 +1,26 @@
 # Branding is resolved from the repo at build time by scripts/eb.mjs
-# (run via `npm run dist`/`dist:win`/`dist:linux`/`pack:dir`), which sets
-# these env vars and writes src/app-name.json for the runtime title.
-# Rename the repo → installers, appId, publish target and title all
-# follow automatically (defaults to CacheStream). Do NOT call
-# electron-builder directly — go through the npm scripts so the env is set.
-appId: ${env.APP_ID}
-productName: ${env.APP_NAME}
-copyright: ${env.APP_COPYRIGHT}
+# (run via `npm run dist`/`dist:win`/`dist:linux`/`pack:dir`), which passes
+# the resolved values as electron-builder CLI overrides (-c.productName=…,
+# -c.appId=…, -c.publish.owner/repo=…, -c.extraMetadata.name=…) and writes
+# src/app-name.json for the runtime title. NOTE: electron-builder does NOT
+# expand ${env.X} in config fields, so these are STATIC CacheStream
+# defaults that eb.mjs overrides; artifactName uses ${productName}, which
+# resolves from the overridden value. Always build via the npm scripts.
+appId: com.cachenetworks.cachestream
+productName: CacheStream
+copyright: MIT
 directories:
   output: dist
   buildResources: build
 
-# Where the in-app auto-updater (electron-updater) looks for new
-# versions, and what `electron-builder --publish` uploads alongside the
-# installers: the update metadata (latest.yml / latest-linux.yml) +
-# .blockmap files. The updater reads the latest GitHub Release here.
+# Where the in-app auto-updater (electron-updater) looks for new versions,
+# and what `--publish` uploads alongside the installers (latest*.yml +
+# .blockmap). owner/repo are overridden per-build by eb.mjs to the repo
+# the build runs in (so a renamed fork publishes to its own releases).
 publish:
   provider: github
-  owner: ${env.GH_OWNER}
-  repo: ${env.GH_REPO}
+  owner: NekoSuneProjectsForks
+  repo: CacheStream
   releaseType: release
 
 # What goes inside the app bundle (the asar). The Electron main

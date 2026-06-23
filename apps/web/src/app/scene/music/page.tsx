@@ -172,7 +172,18 @@ export default function MusicScene() {
 
       const src = ac.createMediaElementSource(audio);
       const sink = ac.createGain();
-      sink.gain.value = 0;            // silent output
+      // Output is SILENT by default — the broadcast audio comes from the
+      // music engine's FFmpeg, and the streamer captures video only, so
+      // the scene must never emit sound (no doubling). EXCEPTION: when the
+      // scene is opened with ?preview=1 (the Visualizer-tab preview / a
+      // dev tab), play the audio audibly so the operator can confirm music
+      // is playing. The real streamer URL has no such param → stays silent.
+      let previewAudio = false;
+      try {
+        const p = new URLSearchParams(window.location.search);
+        previewAudio = p.get("preview") === "1" || p.get("audio") === "1";
+      } catch {}
+      sink.gain.value = previewAudio ? 1 : 0;
 
       src.connect(an);
       src.connect(sink);
@@ -257,15 +268,14 @@ export default function MusicScene() {
           bass = 0.4 + 0.3 * Math.abs(Math.sin(performance.now() / 340)); // procedural pulse
         }
         stepBeat(beat.current, bass);
-        applyBeatFx(beat.current, cfg, stageElRef.current, flashElRef.current);
       } else {
-        if (stageElRef.current && stageElRef.current.style.transform) {
-          stageElRef.current.style.transform = "";
-        }
-        if (flashElRef.current && flashElRef.current.style.opacity !== "0") {
-          flashElRef.current.style.opacity = "0";
-        }
+        // Let any residual envelope decay to rest.
+        beat.current.flash = 0;
+        beat.current.shake = 0;
       }
+      // Always apply: keeps the scrim at its base darkening for text
+      // readability even with the beat FX off.
+      applyBeatFx(beat.current, cfg, stageElRef.current, flashElRef.current);
 
       if (cfg.layout === "waveform") {
         let wave: number[];
@@ -322,20 +332,28 @@ export default function MusicScene() {
     (img.nextElementSibling as HTMLElement | null)?.style.removeProperty("display");
   };
 
-  // Custom background (over the default gradient) + the beat-flash
-  // overlay. Rendered as the first children of the stage so the custom
-  // image sits behind the spectrum/content and both shake with the
-  // stage. The flash opacity is driven imperatively in the render loop.
+  // Custom background (over the default gradient) + a dark scrim that
+  // keeps the now-playing text readable over busy images. The scrim
+  // doubles as the beat layer: on a bass hit its opacity DIPS so the
+  // background flashes into view (instead of an accent-coloured wash).
+  // Both sit behind the spectrum/content and shake with the stage.
   const bgCss = (cfg.background || "").trim();
   const stageFx = (
     <>
       {bgCss && (
         <div
           className="custom-bg"
-          style={{ backgroundImage: `url("${bgCss.replace(/["\\]/g, "")}")` }}
+          style={{
+            backgroundImage: `url("${bgCss.replace(/["\\]/g, "")}")`,
+            backgroundSize: cfg.bgFit === "tile" ? "auto" : cfg.bgFit,
+            backgroundRepeat: cfg.bgFit === "tile" ? "repeat" : "no-repeat",
+            filter: cfg.bgBlur ? `blur(${cfg.bgBlur}px)` : undefined,
+            // slight upscale so blur never bleeds the page edges
+            transform: cfg.bgBlur ? "scale(1.08)" : undefined,
+          }}
         />
       )}
-      <div className="beat-flash" ref={flashElRef} style={{ background: cfg.accent }} />
+      <div className="bg-scrim" ref={flashElRef} />
     </>
   );
 
@@ -354,7 +372,10 @@ export default function MusicScene() {
           (MediaElementSource → analyser) MUST NOT be unmounted on a layout
           switch, or the analyser detaches (spectrum freezes) and playback
           is disrupted. So the audio + bg/flash live outside the branch. */}
-      <main className={`stage${isCircular ? " stage-circular" : ""}`} ref={stageElRef}>
+      <main
+        className={`stage${isCircular ? " stage-circular" : ""}${cfg.layout === "ncs" ? " stage-ncs" : ""}`}
+        ref={stageElRef}
+      >
         {stageFx}
 
         {isCircular ? (
@@ -375,7 +396,7 @@ export default function MusicScene() {
               <span className="badge"><span className="pulse" />{badge}</span>
               <div className="circ-title">{title}</div>
               <div className="circ-artist">{artist}</div>
-              {now?.album && <div className="album">{now.album}</div>}
+              {now?.album && <div className="circ-album">{now.album}</div>}
             </div>
             <span className="station">CacheStream · 91.7 FM</span>
             <Clock />
@@ -505,39 +526,50 @@ function proceduralWave(n: number): number[] {
 
 interface BeatState { env: number; flash: number; shake: number; }
 
+// How far the scrim lifts on a beat + max shake. Kept LIGHT on purpose:
+// the background brightens a little on every bass hit rather than a deep,
+// strobe-like flash (gentler / less photosensitive). The resting scrim
+// darkness is cfg.bgDim and both are scaled by cfg.beatIntensity.
+const SCRIM_DIP = 0.20;    // how much it lifts at a full beat
+const SHAKE_PX = 5;        // max shake offset (px) — subtle
+
 /**
- * Advance the beat envelope from the current bass level. Fires a beat
- * (sets flash/shake to 1) when bass exceeds a moving average — then both
- * decay each frame so the FX feel like punches, not a constant glow.
+ * Advance the beat envelope from the current bass level. Fires on every
+ * bass hit (low threshold) but each pulse is modest and decays quickly,
+ * so the FX happen often without being intense.
  */
 function stepBeat(b: BeatState, bass: number) {
-  const isBeat = bass > b.env * 1.3 && bass > 0.35;
+  const isBeat = bass > b.env * 1.15 && bass > 0.22;
   b.env = b.env * 0.92 + bass * 0.08;
   if (isBeat) { b.flash = 1; b.shake = 1; }
-  b.flash *= 0.80;
-  b.shake *= 0.78;
+  b.flash *= 0.82;
+  b.shake *= 0.80;
 }
 
-/** Apply the decaying beat envelope to the stage (shake) + flash overlay. */
+/** Apply the decaying beat envelope: light shake + a scrim that lifts to
+ *  flash the background into view. The scrim always holds its base
+ *  darkening so text stays readable when the FX are off. */
 function applyBeatFx(
   b: BeatState,
   cfg: VisualizerConfig,
   stageEl: HTMLElement | null,
-  flashEl: HTMLDivElement | null,
+  scrimEl: HTMLDivElement | null,
 ) {
   if (cfg.shake && stageEl) {
-    const m = b.shake * 9;
+    const m = b.shake * SHAKE_PX * cfg.beatIntensity;
     const rx = (Math.random() * 2 - 1) * m;
     const ry = (Math.random() * 2 - 1) * m;
     // Slight scale so the shake never reveals the page edges.
-    stageEl.style.transform = `scale(1.035) translate(${rx.toFixed(1)}px, ${ry.toFixed(1)}px)`;
+    stageEl.style.transform = `scale(1.02) translate(${rx.toFixed(1)}px, ${ry.toFixed(1)}px)`;
   } else if (stageEl && stageEl.style.transform) {
     stageEl.style.transform = "";
   }
-  if (cfg.flash && flashEl) {
-    flashEl.style.opacity = String(Math.min(0.55, b.flash * 0.55));
-  } else if (flashEl && flashEl.style.opacity !== "0") {
-    flashEl.style.opacity = "0";
+  if (scrimEl) {
+    const base = cfg.bgDim;
+    const op = cfg.flash
+      ? Math.max(0.04, base - b.flash * SCRIM_DIP * cfg.beatIntensity)
+      : base;
+    scrimEl.style.opacity = op.toFixed(3);
   }
 }
 
@@ -1058,8 +1090,16 @@ const baseCss = `
     max-width: 80vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .circ-artist { font-size: clamp(1.1rem, 1.8vw, 1.5rem); color: rgba(230,247,255,0.82); }
+  .circ-album { font-size: clamp(1.1rem, 1.8vw, 1.5rem); color: rgba(230,247,255,0.82); }
   .stage-circular .station { bottom: 36px; left: 48px; }
   .stage-circular .clock { bottom: 36px; right: 48px; }
+
+  /* NCS has no centre cover and a big orb, so drop the now-playing text
+     to a lower-third so it doesn't sit over the sphere. */
+  .stage-ncs .circ-meta {
+    top: auto;
+    bottom: 8%;
+  }
 
   /* ----- Custom background + beat FX ----- */
   .stage { will-change: transform; }
@@ -1071,14 +1111,16 @@ const baseCss = `
     z-index: -2; pointer-events: none;
     background-size: cover; background-position: center; background-repeat: no-repeat;
   }
-  /* The beat flash sits BEHIND the spectrum + cover + text (z-index:-1,
-     just above the background) so it pulses the BACKDROP only — it never
-     washes over the visualiser or the now-playing text. */
-  .beat-flash {
+  /* Dark scrim BEHIND the spectrum + cover + text (z-index:-1, above the
+     background) — dims a busy/bright background so the now-playing text
+     stays legible. Its opacity is driven in the render loop: it DIPS on
+     each beat so the background flashes into view. */
+  .bg-scrim {
     position: absolute; inset: 0;
-    z-index: -1; opacity: 0; pointer-events: none;
-    mix-blend-mode: screen;
-    transition: opacity 70ms linear;
+    z-index: -1; pointer-events: none;
+    background: #04050a;
+    opacity: 0.45;
+    transition: opacity 80ms linear;
     will-change: opacity;
   }
 `;

@@ -217,6 +217,66 @@ Each stage ships independently and leaves the app working.
 ## 8. Open questions
 
 - VPzone API capabilities (OAuth? chat transport?) — needs docs/contact.
+  https://vpzone.tv/api/docs is a client-rendered SPA; the raw spec couldn't be
+  auto-read. UI ships a disabled "coming soon" VPzone connection until the
+  endpoints (login, streamkey, chat transport, alerts) are provided.
 - Do moderators need to be generalized beyond Twitch in phase 1? (Proposed: no.)
 - Per-platform "primary chat" for outbound send default vs. explicit target
   picker in the panel.
+
+## Appendix A — Kick implementation reference (verified)
+
+Sourced from docs.kick.com + the working StreamBOT implementation
+(D:\DEV\NekoSuneVRAPPS\Websites\StreamBOT). This is enough to build Kick end
+to end.
+
+### OAuth2 (Authorization Code + PKCE / S256)
+- Authorize: `GET https://id.kick.com/oauth/authorize`
+  params: `response_type=code`, `client_id`, `redirect_uri`, `scope`, `state`,
+  `code_challenge`, `code_challenge_method=S256`.
+- Token: `POST https://id.kick.com/oauth/token` (form-urlencoded)
+  - code: `grant_type=authorization_code` + `code`, `client_id`,
+    `client_secret`, `redirect_uri`, `code_verifier`.
+  - refresh: `grant_type=refresh_token` + `refresh_token`, `client_id`,
+    `client_secret`.
+  - app token (for sending chat as the bot): `grant_type=client_credentials`.
+  - Response: `access_token`, `refresh_token`, `expires_in`, `scope`,
+    `token_type`.
+- Store PKCE `code_verifier` + `state` in short-lived signed cookies (reuse
+  lib/cookies.ts), like the Twitch login route.
+- Scopes: `user:read channel:read channel:write streamkey:read chat:write
+  events:subscribe moderation:ban`.
+
+### REST (base `https://api.kick.com/public/v1`, Bearer)
+- `GET /channels` → `data[]` with `slug`, `broadcaster_user_id`, `id`,
+  `chatroom.id` (+ `chatroom_id`). Resolve the chatroom id here.
+- `GET /users` → linked user info.
+- `POST /chat` → send: `{content, type:"bot"}` (fallback `{content,
+  type:"message", broadcaster_user_id}`); on 401 refresh + retry.
+- `POST /moderation/bans` → timeout/ban.
+- `GET /public-key` → RSA public key for webhook signature verification.
+
+### Chat read — Pusher protocol over WS
+- URL: `wss://ws-us2.pusher.com/app/32cbd69e4b950bf97679?protocol=7&client=js&version=8.4.0&flash=false`
+- On open, subscribe: `{event:"pusher:subscribe", data:{channel:"chatrooms.<chatroomId>.v2", auth:""}}`.
+- Handle event names `App\Events\ChatMessageEvent` and `chat.message.sent`;
+  reply to `pusher:ping` with `pusher:pong`; reconnect with ~5s backoff.
+- Parse: content from `data.content` → `data.message.content`; sender from
+  `data.sender|user|author`; username from `slug|username|name`; badges
+  (object or `identity.badges` array) → isMod / isBroadcaster / isSub / isVip.
+- Normalize → `PlatformChatMessage` (platform:"kick", channelId:chatroomId) and
+  `publish("chat", …)`.
+
+### Events/alerts — webhooks
+- Subscribe with the `events:subscribe` scope; Kick POSTs to our
+  `/api/kick/webhook` with headers `kick-event-type`, `kick-event-message-id`,
+  `kick-event-message-timestamp`, `kick-event-signature`.
+- Verify signature: RSA-SHA256 over `"{id}.{timestamp}.{rawBody}"` against the
+  `/public-key`. Map follow / subscription (+gift/renew) / raid / cheer /
+  stream.online|offline → `PlatformAlert` → `publish("alerts", …)`.
+
+### Settings (kv) for Kick
+- `kick_client_id`, `kick_client_secret` (sensitive), redirect derived from
+  `${publicUrl}/api/auth/kick/callback`.
+- Per-link: `platform_tokens('kick')` + `platform_links('kick', …)` (chatroom
+  id stored alongside for the WS subscribe).

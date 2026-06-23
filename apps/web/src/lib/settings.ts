@@ -44,6 +44,18 @@ const SETTINGS = {
     sensitive: true,
   },
 
+  // ---- Kick OAuth app (multi-platform) ---------------------------
+  kick_client_id: {
+    envKey: "KICK_CLIENT_ID",
+    default: "",
+    sensitive: false,
+  },
+  kick_client_secret: {
+    envKey: "KICK_CLIENT_SECRET",
+    default: "",
+    sensitive: true,
+  },
+
   // ---- Session signing (auto-generated on first boot) -------------
   session_secret: {
     envKey: "SESSION_SECRET",

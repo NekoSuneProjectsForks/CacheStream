@@ -26,6 +26,9 @@ import { pet } from "./games/pet";
 import { datacenter } from "./games/datacenter";
 import { pushIngestToStreamer } from "./twitchIngest";
 import { musicEngine } from "./music";
+import { ensureIngestWatcher } from "./ingest-watcher";
+import { startKickClient } from "./platform/kick";
+import { pushTargetsToStreamer } from "./multistream";
 
 let booted = false;
 let servicesStarted = false;
@@ -54,6 +57,22 @@ export function bootOnce(): void {
   // pre-wizard), the helper turns into a no-op + the OAuth
   // callback will retry once tokens land. See `startServicesIfReady`.
   startServicesIfReady();
+
+  // Disconnect-safety watcher — independent of Twitch tokens (it only
+  // polls the local ingest + switches scenes). No-ops unless enabled in
+  // the kv config. See lib/ingest-watcher.ts.
+  try { ensureIngestWatcher(); } catch (err) { console.warn("[boot] ingest watcher:", err); }
+
+  // Kick chat client — independent of Twitch tokens; no-ops unless a Kick
+  // channel has been linked (Connections tab). See lib/platform/kick.ts.
+  try { startKickClient(); } catch (err) { console.warn("[boot] kick client:", err); }
+
+  // Re-apply saved multistream targets once the streamer is reachable
+  // (the streamer keeps them in memory only, so they must be re-pushed
+  // after an app restart). No-ops when no targets are configured.
+  setTimeout(() => {
+    pushTargetsToStreamer().catch((err) => console.warn("[boot] targets push:", err?.message || err));
+  }, 4_000);
 
   // Seed scene presets for built-in scenes on first boot. Runs
   // regardless of tokens so a fresh install has presets to pick

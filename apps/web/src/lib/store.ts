@@ -67,7 +67,7 @@ export interface ScenePreset {
 
 export interface Overlay {
   id: string;
-  type: "text" | "html" | "image" | "chat" | "alert";
+  type: "text" | "html" | "image" | "chat" | "alert" | "nowplaying";
   text?: string;
   html?: string;
   src?: string;
@@ -110,6 +110,27 @@ export interface OAuthTokens {
   expiresAt: number;
   scopes: string[];
   twitchUserId: string;
+  updatedAt: number;
+}
+
+export interface PlatformLink {
+  platform: string;            // 'twitch' | 'kick' | 'youtube' | 'vpzone'
+  platformUserId: string;
+  login: string | null;
+  displayName: string | null;
+  avatarUrl: string | null;
+  extra: Record<string, unknown>;   // e.g. { chatroomId } for Kick
+  scopes: string[];
+  linkedAt: number;
+}
+
+export interface PlatformTokens {
+  platform: string;
+  accessToken: string;
+  refreshToken: string | null;
+  expiresAt: number;
+  scopes: string[];
+  platformUserId: string | null;
   updatedAt: number;
 }
 
@@ -680,6 +701,65 @@ class Store {
 
   clearTokens(): void { this.db.prepare("DELETE FROM oauth_tokens WHERE id = 1").run(); }
 
+  // ---- Multi-platform accounts (Kick/YouTube/VPzone alongside Twitch) ----
+
+  listPlatformLinks(): PlatformLink[] {
+    return (this.db.prepare("SELECT * FROM platform_links ORDER BY linked_at").all() as any[])
+      .map(mapPlatformLink);
+  }
+
+  getPlatformLink(platform: string): PlatformLink | null {
+    const r = this.db.prepare("SELECT * FROM platform_links WHERE platform = ? LIMIT 1").get(platform) as any;
+    return r ? mapPlatformLink(r) : null;
+  }
+
+  savePlatformLink(l: Omit<PlatformLink, "linkedAt"> & { linkedAt?: number }): PlatformLink {
+    const linkedAt = l.linkedAt ?? Date.now();
+    this.db.prepare(
+      `INSERT INTO platform_links
+        (platform, platform_user_id, login, display_name, avatar_url, extra_json, scopes_json, linked_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(platform, platform_user_id) DO UPDATE SET
+         login=excluded.login, display_name=excluded.display_name,
+         avatar_url=excluded.avatar_url, extra_json=excluded.extra_json,
+         scopes_json=excluded.scopes_json`
+    ).run(
+      l.platform, l.platformUserId, l.login, l.displayName, l.avatarUrl,
+      JSON.stringify(l.extra || {}), JSON.stringify(l.scopes || []), linkedAt,
+    );
+    return { ...l, extra: l.extra || {}, scopes: l.scopes || [], linkedAt };
+  }
+
+  removePlatformLink(platform: string): void {
+    this.db.prepare("DELETE FROM platform_links WHERE platform = ?").run(platform);
+    this.db.prepare("DELETE FROM platform_tokens WHERE platform = ?").run(platform);
+  }
+
+  getPlatformTokens(platform: string): PlatformTokens | null {
+    const r = this.db.prepare("SELECT * FROM platform_tokens WHERE platform = ?").get(platform) as any;
+    if (!r) return null;
+    return {
+      platform: r.platform,
+      accessToken: r.access_token,
+      refreshToken: r.refresh_token,
+      expiresAt: r.expires_at,
+      scopes: JSON.parse(r.scopes_json),
+      platformUserId: r.platform_user_id,
+      updatedAt: r.updated_at,
+    };
+  }
+
+  savePlatformTokens(t: PlatformTokens): void {
+    this.db.prepare(
+      `INSERT OR REPLACE INTO platform_tokens
+        (platform, access_token, refresh_token, expires_at, scopes_json, platform_user_id, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      t.platform, t.accessToken, t.refreshToken, t.expiresAt,
+      JSON.stringify(t.scopes), t.platformUserId, t.updatedAt,
+    );
+  }
+
   // ---- v1.2: Custom commands -----------------------------------
 
   listCommands(): CustomCommand[] {
@@ -1002,6 +1082,21 @@ function mapMusicTrack(r: any): MusicTrack {
     durationS: r.duration_s, coverPath: r.cover_path ?? null,
     manual: !!r.manual,
     addedAt: r.added_at,
+  };
+}
+
+function mapPlatformLink(r: any): PlatformLink {
+  let extra: Record<string, unknown> = {};
+  try { extra = JSON.parse(r.extra_json || "{}"); } catch {}
+  return {
+    platform: r.platform,
+    platformUserId: r.platform_user_id,
+    login: r.login ?? null,
+    displayName: r.display_name ?? null,
+    avatarUrl: r.avatar_url ?? null,
+    extra,
+    scopes: JSON.parse(r.scopes_json || "[]"),
+    linkedAt: r.linked_at,
   };
 }
 

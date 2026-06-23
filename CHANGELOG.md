@@ -1,5 +1,43 @@
 # Changelog
 
+## 1.18.0
+
+Music visualizer overhaul, Studio overlays, multi-platform + multistream.
+
+**Music visualizer**
+- **New spectrum layouts** on the Music scene, selectable from a dedicated
+  **Visualizer** tab: **Trap Nation** (smooth glowing radial blob around the
+  cover), **NCS** (glowing wireframe orb), **Monstercat** (rounded bottom
+  bars), plus Bars / Mirror / Waveform. Live-applies to the running scene.
+- **Beat FX**: a bass-driven background flash + subtle screen shake (kept
+  light/non-strobe), with a strength slider.
+- **Custom background** image (upload or URL) with dim / blur / fit controls,
+  and a background scrim so the now-playing text stays readable.
+- **GPU fix**: the spectrum no longer drops the host framerate while gaming
+  (no per-frame canvas realloc / drop-shadow; cached gradient; FPS cap).
+- **Self-healing album art**: covers are re-extracted on demand, fixing tracks
+  whose art was missed at scan time.
+- Dev preview audio: open the scene with `?preview=1` to hear the music; the
+  broadcast scene stays silent (ffmpeg audio only).
+
+**Studio**
+- **Now Playing** overlay layer — drop a live now-playing card onto any scene.
+- **Disconnect safety** — optionally auto-switch the program to a safety scene
+  when the RTMP ingest drops, and switch back when it reconnects (toggle per
+  stream; great for IRL).
+
+**Multi-platform (beta)** — a new **Connections** tab to link platforms beyond
+Twitch. **Kick** support (OAuth2 + chat + alerts) is implemented; YouTube and
+VPzone are shown as "coming soon".
+
+**Multistream (v1)** — a new **Multistream** tab to send the stream to several
+RTMP targets at once (FFmpeg `tee`), with per-target enable toggles + an uplink
+estimate. (Live per-target on/off without a restart is coming next.)
+
+**Build** — the app name, installers, app id and auto-update target now follow
+the **repository name** automatically (defaults to CacheStream), so a renamed
+fork builds + updates under its own name with no hardcoding.
+
 ## 1.17.0
 
 Desktop app auto-update.
