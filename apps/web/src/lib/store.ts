@@ -831,6 +831,15 @@ class Store {
     return next;
   }
 
+  /**
+   * Persist an auto-extracted cover path WITHOUT flagging the track
+   * as manually edited. Used by the self-healing cover route so a
+   * later rescan can still re-derive everything else from tags.
+   */
+  setMusicTrackCover(id: string, coverPath: string | null): void {
+    this.db.prepare("UPDATE music_tracks SET cover_path=? WHERE id=?").run(coverPath, id);
+  }
+
   removeMusicTrack(id: string): boolean {
     return this.db.prepare("DELETE FROM music_tracks WHERE id = ?").run(id).changes > 0;
   }

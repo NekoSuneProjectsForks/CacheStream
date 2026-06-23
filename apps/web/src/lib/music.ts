@@ -235,10 +235,18 @@ class MusicEngine {
           if (meta.format?.duration) durationS = Math.round(meta.format.duration);
 
           const picture = meta.common.picture?.[0];
-          if (picture && !coverPath) {
-            const ext = (picture.format || "image/jpeg").split("/")[1] || "jpg";
+          if (picture?.data && picture.data.length > 0 && !coverPath) {
+            // Map MIME ("image/jpeg") or bare ext ("jpg"/"JPEG") to a
+            // sane file extension. The old `format.split("/")[1]` left
+            // a literal "undefined" extension for non-MIME formats,
+            // which is why some embedded covers never rendered.
+            const f = (picture.format || "").toLowerCase();
+            const ext = f.includes("png") ? "png"
+              : f.includes("webp") ? "webp"
+              : f.includes("gif") ? "gif"
+              : "jpg";
             const file = path.join(coversDir, `${id}.${ext}`);
-            fs.writeFileSync(file, picture.data);
+            fs.writeFileSync(file, Buffer.from(picture.data));
             coverPath = file;
           }
         } catch (err) {

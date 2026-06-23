@@ -2,6 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiJson } from "./util";
+import {
+  VISUALIZER_DEFAULTS,
+  VISUALIZER_LAYOUTS,
+  VISUALIZER_LAYOUT_LABELS,
+  type VisualizerConfig,
+} from "@/lib/visualizer-config";
 
 interface Track  {
   id: string; path: string;
@@ -34,19 +40,38 @@ export function MusicTab() {
   const [presets, setPresets] = useState<RadioPreset[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [vis, setVis] = useState<VisualizerConfig>(VISUALIZER_DEFAULTS);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const loadAll = useCallback(async () => {
     try {
-      const [s, lib, radio] = await Promise.all([
+      const [s, lib, radio, v] = await Promise.all([
         apiJson("/api/music/status"),
         apiJson("/api/music/library"),
         apiJson("/api/music/radio"),
+        apiJson("/api/music/visualizer"),
       ]);
       setStatus(s.status); setTracks(lib.tracks || []); setPresets(radio.presets || []);
+      if (v.visualizer) setVis(v.visualizer);
     } catch (e: any) { setError(e.message); }
   }, []);
+
+  // Persist a visualizer change. Optimistically updates local state
+  // so the controls feel instant; the scene picks it up within its
+  // ~5s config poll.
+  const updateVis = async (patch: Partial<VisualizerConfig>) => {
+    const next = { ...vis, ...patch };
+    setVis(next);
+    try {
+      const r = await apiJson("/api/music/visualizer", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      if (r.visualizer) setVis(r.visualizer);
+    } catch (e: any) { setError(e.message); }
+  };
   useEffect(() => { loadAll(); const id = setInterval(loadAll, 5_000); return () => clearInterval(id); }, [loadAll]);
 
   const wrap = async (label: string, fn: () => Promise<any>) => {
@@ -246,6 +271,78 @@ export function MusicTab() {
         )}
 
         {status?.lastError && <p className="hint" style={{ color: "var(--err)" }}>{status.lastError}</p>}
+      </section>
+
+      <section className="card">
+        <div className="card-head">
+          <h2>Visualizer</h2>
+          <span className="muted">/scene/music spectrum</span>
+        </div>
+        <p className="hint">
+          Pick the spectrum style for the Music scene. Changes apply to a running
+          scene within a few seconds — no restart needed. Lower the FPS cap if the
+          spectrum costs you frames in games.
+        </p>
+
+        <div className="vis-grid">
+          <label className="vis-field">
+            <span className="vis-label">Layout</span>
+            <select className="input" value={vis.layout}
+                    onChange={(e) => updateVis({ layout: e.target.value as VisualizerConfig["layout"] })}>
+              {VISUALIZER_LAYOUTS.map((l) => (
+                <option key={l} value={l}>{VISUALIZER_LAYOUT_LABELS[l]}</option>
+              ))}
+            </select>
+          </label>
+
+          <label className="vis-field">
+            <span className="vis-label">FPS cap <span className="mono">{vis.fps}</span></span>
+            <input type="range" min={15} max={30} step={1} value={vis.fps}
+                   onChange={(e) => updateVis({ fps: Number(e.target.value) })} />
+          </label>
+
+          <label className="vis-field">
+            <span className="vis-label">Sensitivity <span className="mono">{vis.sensitivity.toFixed(2)}×</span></span>
+            <input type="range" min={0.5} max={2.5} step={0.05} value={vis.sensitivity}
+                   onChange={(e) => updateVis({ sensitivity: Number(e.target.value) })} />
+          </label>
+
+          <label className="vis-field">
+            <span className="vis-label">Bar count <span className="mono">{vis.barCount}</span></span>
+            <input type="range" min={16} max={96} step={2} value={vis.barCount}
+                   onChange={(e) => updateVis({ barCount: Number(e.target.value) })} />
+          </label>
+
+          <label className="vis-field">
+            <span className="vis-label">Accent</span>
+            <input type="color" className="vis-color" value={vis.accent}
+                   onChange={(e) => updateVis({ accent: e.target.value })} />
+          </label>
+
+          <label className="vis-field">
+            <span className="vis-label">Accent 2</span>
+            <input type="color" className="vis-color" value={vis.accent2}
+                   onChange={(e) => updateVis({ accent2: e.target.value })} />
+          </label>
+        </div>
+
+        <div className="vis-toggles">
+          <label className="row" style={{ gap: 8 }}>
+            <input type="checkbox" checked={vis.mirror}
+                   onChange={(e) => updateVis({ mirror: e.target.checked })} />
+            Mirror reflection <span className="muted">(bars)</span>
+          </label>
+          <label className="row" style={{ gap: 8 }}>
+            <input type="checkbox" checked={vis.particles}
+                   onChange={(e) => updateVis({ particles: e.target.checked })} />
+            Particles <span className="muted">(circular)</span>
+          </label>
+          <label className="row" style={{ gap: 8 }}>
+            <input type="checkbox" checked={vis.showVinyl}
+                   onChange={(e) => updateVis({ showVinyl: e.target.checked })} />
+            Spinning vinyl <span className="muted">(bars)</span>
+          </label>
+        </div>
       </section>
 
       <section className="card">
@@ -468,6 +565,32 @@ export function MusicTab() {
         .track-edit {
           display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px;
         }
+
+        .vis-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+          gap: 14px;
+          margin-top: 6px;
+        }
+        .vis-field { display: flex; flex-direction: column; gap: 6px; }
+        .vis-label {
+          font-size: 10px; letter-spacing: .22em; text-transform: uppercase;
+          color: var(--text-mute);
+          display: flex; justify-content: space-between; align-items: center;
+        }
+        .vis-field input[type="range"] { width: 100%; accent-color: var(--neon-cyan); }
+        .vis-color {
+          width: 100%; height: 34px; padding: 2px;
+          background: rgba(5,6,10,0.4);
+          border: 1px solid var(--line); border-radius: 4px; cursor: pointer;
+        }
+        .vis-toggles {
+          display: flex; flex-wrap: wrap; gap: 18px;
+          margin-top: 14px; padding-top: 12px;
+          border-top: 1px solid var(--line-soft);
+          font-size: .85rem; color: var(--text-dim);
+        }
+        .vis-toggles input[type="checkbox"] { accent-color: var(--neon-cyan); }
       `}</style>
     </>
   );
