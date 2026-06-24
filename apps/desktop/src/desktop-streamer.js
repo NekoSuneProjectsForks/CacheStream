@@ -184,8 +184,10 @@ class DesktopStreamer extends EventEmitter {
   }
 
   async start() {
-    if (!this.config.twitch.streamKey) {
-      this.error = "TWITCH_STREAM_KEY is not set";
+    // Need somewhere to send the stream: a Twitch key, or at least one
+    // enabled multistream target (so a Twitch-less single-target setup works).
+    if (!this.config.twitch.streamKey && this._enabledTargets().length === 0) {
+      this.error = "No stream destination — set a Twitch key or enable a multistream target";
       this._setState("idle");
       throw new Error(this.error);
     }
@@ -254,30 +256,82 @@ class DesktopStreamer extends EventEmitter {
    * Multistream targets (restream.io-style). `targets` = array of
    * { id, label, protocol, ingestUrl, streamKey, enabled }.
    *
-   * When ANY target is configured the pipeline runs in RELAY mode: the
-   * primary encoder publishes ONCE to a local RTMP feed and each ENABLED
-   * target gets its own `-c copy` relay process — so a target can be
-   * toggled on/off LIVE without dropping the others. With zero targets it
-   * uses the legacy single direct output (unchanged). Only the mode
-   * transition (first target added / last removed) restarts the primary;
-   * toggling a target inside relay mode is hot.
+   * With 2+ ENABLED targets the pipeline runs in RELAY mode: the primary
+   * encoder publishes ONCE to a local RTMP feed and each enabled target gets
+   * its own `-c copy` relay process — so a target can be toggled on/off LIVE
+   * without dropping the others.
+   *
+   * With 0 or 1 enabled target the primary streams DIRECTLY to the
+   * destination (Twitch config, or the single target). Routing a single
+   * output through the in-process RTMP relay would make node-media-server
+   * parse/forward the whole video on the Electron MAIN thread — the same
+   * thread that JPEG-encodes every captured frame — which starves the
+   * capture loop and tanks the framerate (the "~4 fps" regression). So we
+   * only pay that cost when the operator genuinely asks for 2+ outputs.
+   *
+   * Only a change to the PRIMARY path (relay⇄direct, or the single direct
+   * destination) restarts the pipeline; adding/removing among 2+ targets is
+   * a hot relay sync.
    */
   async setTargets(targets) {
-    const wasRelay = this._relayMode();
+    const before = this._primarySignature();
     this.config.targets = Array.isArray(targets) ? targets : [];
-    const isRelay = this._relayMode();
+    const after = this._primarySignature();
     if (this.state !== "running" && this.state !== "reconnecting") return;
-    if (wasRelay !== isRelay) {
-      this.logger.info({ relay: isRelay }, "multistream mode changed; restarting pipeline");
+    if (before !== after) {
+      this.logger.info({ before, after }, "multistream primary path changed; restarting pipeline");
       await this.restart();
-    } else if (isRelay) {
-      this._syncRelays();   // hot add/remove per-target relays
+    } else if (this._relayMode()) {
+      this._syncRelays();   // hot add/remove per-target relays (2+ targets)
     }
   }
 
-  /** Relay mode is active whenever any multistream target is configured. */
+  /**
+   * Relay mode (local feed + per-target `-c copy`) is only worth its
+   * main-thread cost for 2+ outputs. 0/1 enabled → direct, no local RTMP hop.
+   */
   _relayMode() {
-    return Array.isArray(this.config.targets) && this.config.targets.length > 0;
+    return this._enabledTargets().length >= 2;
+  }
+
+  /**
+   * A stable fingerprint of the PRIMARY encoder's output destination, so
+   * `setTargets` can tell a real primary-path change (needs a restart) from
+   * a relay-only change (hot). Deliberately ignores bandwidth auto-protect
+   * (effective set) so a fluctuating uplink never restarts the primary.
+   */
+  _primarySignature() {
+    const e = this._enabledTargets();
+    if (e.length >= 2) return "relay";
+    if (e.length === 1) return `direct|${e[0].protocol || "rtmp"}|${e[0].ingestUrl}|${e[0].streamKey || ""}`;
+    const { twitch } = this.config;
+    return `twitch|${twitch.ingestUrl}|${twitch.streamKey || ""}`;
+  }
+
+  /**
+   * Resolve the primary encoder's output: { relay, outputArgs, redactKeys,
+   * safeUrl }. 2+ enabled → local relay feed; exactly 1 → that target direct;
+   * else → legacy Twitch config.
+   */
+  _primaryPlan() {
+    const flv = (url) => ["-f", "flv", "-rtmp_live", "live", "-flvflags", "no_duration_filesize", url];
+    const enabled = this._enabledTargets();
+    if (enabled.length >= 2) {
+      return { relay: true, outputArgs: flv(this._localFeedUrl()),
+               redactKeys: [], safeUrl: "rtmp://127.0.0.1/cs-multi/main (multistream relay)" };
+    }
+    if (enabled.length === 1) {
+      const t = enabled[0];
+      const out = this._relayOutputArgs(t);   // protocol → muxer + url(+key)
+      if (out) {
+        return { relay: false, outputArgs: out,
+                 redactKeys: t.streamKey ? [t.streamKey] : [], safeUrl: `${t.ingestUrl}/***` };
+      }
+      // whep/ftl etc. aren't directly muxable — fall through to Twitch.
+    }
+    const { twitch } = this.config;
+    return { relay: false, outputArgs: flv(`${twitch.ingestUrl}/${twitch.streamKey}`),
+             redactKeys: twitch.streamKey ? [twitch.streamKey] : [], safeUrl: `${twitch.ingestUrl}/***` };
   }
 
   /** Local RTMP feed the primary publishes to + the relays read from. */
@@ -401,19 +455,28 @@ class DesktopStreamer extends EventEmitter {
 
   /** Per-target status for the panel (red/orange/green dots). */
   _relayStatus() {
-    const active = this._relayMode();
+    const active = this._relayMode();                  // 2+ enabled → relays
     const byId = this.relays;
     const throttled = active ? this._throttledIds() : new Set();
+    const enabled = this._enabledTargets();
+    // In direct mode the single enabled target is carried by the PRIMARY
+    // encoder (no relay process), so its dot follows the ingest handshake.
+    const directId = !active && enabled.length === 1 ? this._targetId(enabled[0]) : null;
     return {
       active,
       targets: (Array.isArray(this.config.targets) ? this.config.targets : []).map((t) => {
         const id = this._targetId(t);
-        const rec = byId.get(id);
         let state = "off";
         if (t.enabled === false || !t.ingestUrl) state = "off";
         else if (this.state !== "running") state = "idle";
-        else if (throttled.has(id)) state = "throttled";   // held by auto-protect
-        else state = rec ? rec.state : "connecting";
+        else if (active) {
+          if (throttled.has(id)) state = "throttled";   // held by auto-protect
+          else { const rec = byId.get(id); state = rec ? rec.state : "connecting"; }
+        } else if (id === directId) {
+          state = this.ingestAccepted ? "connected" : "connecting";
+        } else {
+          state = "idle";   // enabled but not the active direct output
+        }
         return { id, label: t.label || "", enabled: t.enabled !== false, state };
       }),
     };
@@ -547,11 +610,11 @@ class DesktopStreamer extends EventEmitter {
     // publishes ONCE to a local RTMP feed that the per-target relays read
     // (so targets toggle on/off live). Otherwise the legacy single direct
     // Twitch output.
-    const relay = this._relayMode();
-    const primaryUrl = relay ? this._localFeedUrl() : `${twitch.ingestUrl}/${twitch.streamKey}`;
-    const safeUrl = relay ? "rtmp://127.0.0.1/cs-multi/main (multistream relay)" : `${twitch.ingestUrl}/***`;
-    const redactKeys = relay ? [] : [twitch.streamKey].filter(Boolean);
-    const outputArgs = ["-f", "flv", "-rtmp_live", "live", "-flvflags", "no_duration_filesize", primaryUrl];
+    const plan = this._primaryPlan();
+    const relay = plan.relay;
+    const safeUrl = plan.safeUrl;
+    const redactKeys = plan.redactKeys;
+    const outputArgs = plan.outputArgs;
     const logLevel = process.env.STREAM_FFMPEG_LOGLEVEL || "warning";
     // Offscreen 'paint' events don't fire at perfectly even intervals,
     // so the wallclock-stamped frames have jittery PTS. Twitch's

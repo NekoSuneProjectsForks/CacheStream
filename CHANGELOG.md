@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.18.3
+
+Framerate hotfix.
+
+- **Fixed a major framerate drop (~4 fps) introduced in 1.18.1.** Auto-adding
+  Twitch as a multistream target made the encoder route a single output
+  through the in-process RTMP relay, whose work runs on the same thread that
+  captures/encodes frames — starving the capture loop. The relay path now only
+  engages for **2+ enabled outputs**; a single destination streams directly
+  again (no local hop), restoring full framerate. Multistreaming 2+ targets is
+  unchanged (live toggles + status dots still work).
+- The upload speed probe now only runs while actually multistreaming (2+
+  outputs), so single-output streamers have zero probe overhead.
+
 ## 1.18.2
 
 Music playback fixes.

@@ -67,13 +67,21 @@ class BandwidthMonitor extends EventEmitter {
     this.timer = null;
   }
 
-  /** Begin periodic probing. Runs the first probe almost immediately. */
+  /**
+   * Begin periodic probing. The periodic probe only runs when multistream is
+   * actually active (2+ enabled outputs) — that's the only time the
+   * max-streams cap matters, and it keeps the probe (which runs on the same
+   * thread as frame capture) off the back of single-output streamers. A
+   * manual "Re-test now" always probes regardless.
+   */
   start() {
     if (this.timer) return;
-    // First probe after a short delay so app boot isn't competing with it.
-    this.timer = setInterval(() => this.probe(), this.opt.intervalMs);
+    this.timer = setInterval(() => {
+      if (this.enabledCount() >= 2) this.probe();
+    }, this.opt.intervalMs);
     if (this.timer.unref) this.timer.unref();   // never keep the app alive
-    setTimeout(() => this.probe(), 4000);
+    // One probe shortly after boot if already multistreaming.
+    setTimeout(() => { if (this.enabledCount() >= 2) this.probe(); }, 4000);
   }
 
   stop() {
