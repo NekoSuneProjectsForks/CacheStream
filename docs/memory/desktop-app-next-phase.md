@@ -1,10 +1,8 @@
 ---
 name: desktop-app-next-phase
 description: "Electron desktop app (no Docker) — MERGED to main at v1.14.2; runtime end-to-end test still the open item"
-metadata: 
-  node_type: memory
+metadata:
   type: project
-  originSessionId: 0afe9f76-3874-445b-9beb-bcb32213500d
 ---
 
 The native **Electron** desktop app is **merged into `main`** (now v1.14.2) — `main` is ahead of the old `feat/desktop-app` branch. It runs CacheStream without Docker on Linux x64/arm64 (incl. Raspberry Pi) + Windows x64/arm64, bundling Chromium + a static FFmpeg. README documents it at README.md:155-172.

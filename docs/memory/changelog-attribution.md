@@ -1,10 +1,8 @@
 ---
 name: changelog-attribution
 description: "How to attribute CHANGELOG.md entries — credit the human committer by username, never Claude"
-metadata: 
-  node_type: memory
+metadata:
   type: feedback
-  originSessionId: 7f25c0a3-b71f-4828-b98a-f9466c18a312
 ---
 
 In `CHANGELOG.md`, every version entry must record **who committed/pushed it**, by username only, as a line directly under the version heading:
