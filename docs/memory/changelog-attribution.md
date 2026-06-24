@@ -24,3 +24,7 @@ Rules:
 **Why:** the user wants to track which person shipped each release; the changelog is shown as the in-app updater's release notes.
 
 **How to apply:** when adding a new `## <version>` block, add the `_Committed by <username>._` line under it. Get the name from `git config user.name`.
+
+**Contributor summary:** `CHANGELOG.md` has a contributors line under the `# Changelog` header listing each person's mapped commit count. Refresh it on each release/version bump from `git shortlog -sn HEAD`, mapping cachenetworks / Claude / CacheNetworks → **CacheNetworks** and NekoSuneVR → **NekoSuneVR**. Write counts INCLUSIVE of the commit being made.
+
+**In-repo memory copy:** this memory is mirrored into the repo at `docs/memory/` (MEMORY.md + each note + README) so others can read it. When a note changes, re-copy it there and commit. See [[changelog-attribution]] itself as the canonical source.
