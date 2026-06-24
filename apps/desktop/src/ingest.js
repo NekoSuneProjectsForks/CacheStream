@@ -98,6 +98,10 @@ class IngestServer {
 
     this.nms.on("postPublish", (id, streamPath) => {
       const { app, key } = parsePath(streamPath);
+      // Internal multistream relay feed — the primary encoder publishes
+      // here and the per-target relays read it. Don't track it / spawn HLS
+      // (it's not a viewer ingest and must not show as "live").
+      if (app === "cs-multi") return;
       if (!key || !KEY_RX.test(key)) {
         this.logger.warn?.({ streamPath }, "ingest: rejecting publish with invalid key");
         try { this.nms.getSession(id)?.reject?.(); } catch {}

@@ -1,6 +1,6 @@
 {
   "name": "cachestream-desktop",
-  "version": "1.18.0",
+  "version": "1.18.1",
   "private": true,
   "description": "CacheStream as a native desktop app — runs the panel + streams a webpage to Twitch without Docker. Bundles Chromium (Electron) + a static FFmpeg.",
   "main": "src/main.js",

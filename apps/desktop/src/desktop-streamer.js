@@ -29,6 +29,7 @@ const { spawn } = require("node:child_process");
 const { EventEmitter } = require("node:events");
 const { BrowserWindow } = require("electron");
 const { buildVideoCodecArgs, buildVideoFilters } = require("./streamer/ffmpeg");
+const { BandwidthMonitor } = require("./bandwidth");
 
 const OVERLAY_CONTAINER_ID = "__cachestream_overlays__";
 
@@ -86,12 +87,35 @@ function overlayInjector(containerId, overlays) {
 }
 
 class DesktopStreamer extends EventEmitter {
-  constructor({ config, logger, ffmpegPath, relayOutPort }) {
+  constructor({ config, logger, ffmpegPath, relayOutPort, rtmpPort }) {
     super();
     this.config = config;
     this.logger = logger;
     this.ffmpegPath = ffmpegPath || "ffmpeg";
     this.relayOutPort = relayOutPort;
+    this.rtmpPort = rtmpPort;
+    // Multistream per-target relay processes (id -> { proc, label, state }).
+    this.relays = new Map();
+
+    // Upload bandwidth monitor + multistream auto-protect. Watches the
+    // real house uplink and caps how many outputs fan out so we never
+    // oversubscribe the link (which would drop frames for every viewer).
+    this.bandwidth = new BandwidthMonitor({
+      logger: logger?.child ? logger.child({ module: "bandwidth" }) : logger,
+      perStreamMbps: () => {
+        const v = Number(this.config.video?.bitrateKbps) || 0;
+        const a = Number(this.config.audio?.bitrateKbps) || 0;
+        return (v + a) / 1000;
+      },
+      enabledCount: () => this._enabledTargets().length,
+    });
+    // A bandwidth change can raise/lower the cap → re-sync relays so
+    // throttled outputs come back (or get held) without a restart.
+    this.bandwidth.on("change", () => {
+      if (this.state === "running" && this._relayMode()) this._syncRelays();
+      this.emit("status", this.status());
+    });
+    this.bandwidth.start();
 
     this.state = "idle";
     this.error = null;
@@ -150,6 +174,8 @@ class DesktopStreamer extends EventEmitter {
         ingestUrl: this.config.twitch.ingestUrl,
         keyConfigured: Boolean(this.config.twitch.streamKey),
       },
+      multistream: this._relayStatus(),
+      bandwidth: this.bandwidth.status(),
       video: this.config.video,
       autoProfile: this.config.runtime?.autoProfile || null,
       thermal: this.thermal ? this.thermal.status() : null,
@@ -225,35 +251,179 @@ class DesktopStreamer extends EventEmitter {
   }
 
   /**
-   * Multistream targets (restream.io-style). `targets` is an array of
-   * { ingestUrl, streamKey, label, enabled }. When 2+ enabled targets
-   * exist the pipeline fans out via FFmpeg's `tee` muxer; with 0–1 it
-   * behaves exactly as the legacy single Twitch output. Hot-restarts if
-   * the effective set changed while running.
+   * Multistream targets (restream.io-style). `targets` = array of
+   * { id, label, protocol, ingestUrl, streamKey, enabled }.
+   *
+   * When ANY target is configured the pipeline runs in RELAY mode: the
+   * primary encoder publishes ONCE to a local RTMP feed and each ENABLED
+   * target gets its own `-c copy` relay process — so a target can be
+   * toggled on/off LIVE without dropping the others. With zero targets it
+   * uses the legacy single direct output (unchanged). Only the mode
+   * transition (first target added / last removed) restarts the primary;
+   * toggling a target inside relay mode is hot.
    */
   async setTargets(targets) {
-    const next = Array.isArray(targets) ? targets : [];
-    const before = JSON.stringify(this._outputTargets());
-    this.config.targets = next;
-    const after = JSON.stringify(this._outputTargets());
-    if (before !== after) {
-      this.logger.info({ count: this._outputTargets().length }, "multistream targets updated");
-      if (this.state === "running" || this.state === "reconnecting") await this.restart();
+    const wasRelay = this._relayMode();
+    this.config.targets = Array.isArray(targets) ? targets : [];
+    const isRelay = this._relayMode();
+    if (this.state !== "running" && this.state !== "reconnecting") return;
+    if (wasRelay !== isRelay) {
+      this.logger.info({ relay: isRelay }, "multistream mode changed; restarting pipeline");
+      await this.restart();
+    } else if (isRelay) {
+      this._syncRelays();   // hot add/remove per-target relays
     }
   }
 
+  /** Relay mode is active whenever any multistream target is configured. */
+  _relayMode() {
+    return Array.isArray(this.config.targets) && this.config.targets.length > 0;
+  }
+
+  /** Local RTMP feed the primary publishes to + the relays read from. */
+  _localFeedUrl() {
+    return `rtmp://127.0.0.1:${this.rtmpPort}/cs-multi/main`;
+  }
+
+  _targetId(t) { return String(t.id || `${t.protocol || "rtmp"}:${t.ingestUrl}`); }
+
+  /** Enabled targets with a destination (what the operator WANTS live). */
+  _enabledTargets() {
+    return (Array.isArray(this.config.targets) ? this.config.targets : [])
+      .filter((t) => t && t.enabled !== false && t.ingestUrl);
+  }
+
   /**
-   * The effective RTMP outputs. Enabled targets with a key win; otherwise
-   * we fall back to the legacy single Twitch target so behaviour is
-   * unchanged when multistream isn't configured.
+   * The enabled targets we actually run RIGHT NOW. When auto-protect is on
+   * and the measured uplink can't carry every enabled output, the list is
+   * trimmed to `maxStreams` (keeping order → Twitch/priority first); the
+   * dropped ones are reported as "throttled" rather than failed.
    */
-  _outputTargets() {
-    const list = Array.isArray(this.config.targets) ? this.config.targets : [];
-    const enabled = list.filter((t) => t && t.enabled !== false && t.streamKey && t.ingestUrl);
-    if (enabled.length) {
-      return enabled.map((t) => ({ ingestUrl: t.ingestUrl, streamKey: t.streamKey, label: t.label || "" }));
+  _effectiveEnabledTargets() {
+    const enabled = this._enabledTargets();
+    const max = this.bandwidth?.autoProtect ? this.bandwidth.maxStreams() : null;
+    if (max == null || enabled.length <= max) return enabled;
+    return enabled.slice(0, max);
+  }
+
+  /** Set of target ids held back by auto-protect. */
+  _throttledIds() {
+    const eff = new Set(this._effectiveEnabledTargets().map((t) => this._targetId(t)));
+    const out = new Set();
+    for (const t of this._enabledTargets()) {
+      const id = this._targetId(t);
+      if (!eff.has(id)) out.add(id);
     }
-    return [{ ingestUrl: this.config.twitch.ingestUrl, streamKey: this.config.twitch.streamKey, label: "Twitch" }];
+    return out;
+  }
+
+  /** Spawn/stop per-target relay processes to match the effective set. */
+  _syncRelays() {
+    if (!this._relayMode() || this.state !== "running") { this._killAllRelays(); return; }
+    const want = new Map(this._effectiveEnabledTargets().map((t) => [this._targetId(t), t]));
+    for (const [id, rec] of this.relays) {
+      if (!want.has(id)) { rec.stop = true; try { rec.proc?.kill("SIGTERM"); } catch {} this.relays.delete(id); }
+    }
+    for (const [id, t] of want) {
+      if (!this.relays.has(id)) this._spawnRelay(id, t);
+    }
+    this.emit("status", this.status());
+  }
+
+  _spawnRelay(id, t) {
+    const out = this._relayOutputArgs(t);
+    if (!out) {
+      this.logger.warn({ protocol: t.protocol, label: t.label }, "multistream: unsupported protocol; skipping");
+      this.relays.set(id, { proc: null, label: t.label || "", state: "failed", startedAt: Date.now(), stop: false });
+      return;
+    }
+    const args = [
+      "-hide_banner", "-loglevel", "warning", "-nostats",
+      "-fflags", "+nobuffer",
+      "-i", this._localFeedUrl(),
+      "-c", "copy",
+      ...out,
+    ];
+    const rec = { proc: null, label: t.label || "", state: "connecting", startedAt: Date.now(), stop: false };
+    this.relays.set(id, rec);
+    let proc;
+    try { proc = spawn(this.ffmpegPath, args, { stdio: ["ignore", "ignore", "pipe"] }); }
+    catch (err) { rec.state = "failed"; this.logger.warn({ err: err.message, label: rec.label }, "relay spawn failed"); return; }
+    rec.proc = proc;
+
+    const keys = this._enabledTargets().map((x) => x.streamKey).filter(Boolean);
+    const redact = (s) => keys.reduce((acc, k) => acc.split(k).join("***"), s);
+    // Mark connected once it has streamed a few seconds without dying.
+    const okTimer = setTimeout(() => {
+      if (this.relays.get(id) === rec && !rec.stop) { rec.state = "connected"; this.emit("status", this.status()); }
+    }, 4000);
+    proc.stderr?.on("data", (chunk) => {
+      const line = redact(chunk.toString().trim());
+      if (line && /error|failed|cannot|unable|refused|not found/i.test(line)) {
+        this.logger.warn({ relay: rec.label, line }, "relay ffmpeg");
+      }
+    });
+    proc.on("exit", () => {
+      clearTimeout(okTimer);
+      if (this.relays.get(id) !== rec) return;
+      if (rec.stop) { this.relays.delete(id); return; }
+      rec.state = "connecting";          // feed not ready / dropped — retry
+      // A relay dropping mid-stream is a live congestion signal — ask the
+      // monitor to re-test early instead of waiting for the 20-min tick.
+      this.bandwidth?.noteCongestion?.("relay drop");
+      this.emit("status", this.status());
+      setTimeout(() => {
+        const still = this._enabledTargets().find((x) => this._targetId(x) === id);
+        if (still && this._relayMode() && this.state === "running" && this.relays.get(id) === rec) {
+          this._spawnRelay(id, still);
+        }
+      }, 3000);
+    });
+  }
+
+  /** Per-target output muxer args (after the shared `-c copy`). */
+  _relayOutputArgs(t) {
+    const p = String(t.protocol || "rtmp").toLowerCase();
+    const url = t.ingestUrl;
+    const withKey = t.streamKey ? `${url}/${t.streamKey}` : url;
+    if (p === "rtmp" || p === "rtmps") return ["-f", "flv", "-rtmp_live", "live", "-flvflags", "no_duration_filesize", withKey];
+    if (p === "srt")    return ["-f", "mpegts", url];
+    if (p === "rtsp")   return ["-f", "rtsp", "-rtsp_transport", "tcp", url];
+    if (p === "mpegts" || p === "udp") return ["-f", "mpegts", url];
+    if (p === "custom") return ["-f", (t.format || "flv"), withKey];
+    return null;   // whep / ftl — not supported by FFmpeg copy
+  }
+
+  _killAllRelays() {
+    for (const [, rec] of this.relays) { rec.stop = true; try { rec.proc?.kill("SIGTERM"); } catch {} }
+    this.relays.clear();
+  }
+
+  /** Per-target status for the panel (red/orange/green dots). */
+  _relayStatus() {
+    const active = this._relayMode();
+    const byId = this.relays;
+    const throttled = active ? this._throttledIds() : new Set();
+    return {
+      active,
+      targets: (Array.isArray(this.config.targets) ? this.config.targets : []).map((t) => {
+        const id = this._targetId(t);
+        const rec = byId.get(id);
+        let state = "off";
+        if (t.enabled === false || !t.ingestUrl) state = "off";
+        else if (this.state !== "running") state = "idle";
+        else if (throttled.has(id)) state = "throttled";   // held by auto-protect
+        else state = rec ? rec.state : "connecting";
+        return { id, label: t.label || "", enabled: t.enabled !== false, state };
+      }),
+    };
+  }
+
+  /** Bandwidth / auto-protect controls from the panel. */
+  setBandwidthOptions(opts = {}) {
+    if (typeof opts.autoProtect === "boolean") this.bandwidth.setAutoProtect(opts.autoProtect);
+    if (opts.retest) this.bandwidth.retest();
+    return this.bandwidth.status();
   }
 
   // ---- VOD ------------------------------------------------------
@@ -372,19 +542,16 @@ class DesktopStreamer extends EventEmitter {
   }
 
   _spawnFFmpeg() {
-    const { video, audio } = this.config;
-    // Multistream: one tee output per enabled target (>=2), else the
-    // legacy single RTMP output. `onfail=ignore` so one dead target can't
-    // drop the others.
-    const targets = this._outputTargets();
-    const safeUrl = targets.map((t) => `${t.ingestUrl}/***`).join(", ");
-    const outputArgs = targets.length <= 1
-      ? ["-f", "flv", "-rtmp_live", "live", "-flvflags", "no_duration_filesize",
-         `${targets[0].ingestUrl}/${targets[0].streamKey}`]
-      : ["-f", "tee",
-         targets
-           .map((t) => `[f=flv:onfail=ignore:rtmp_live=live:flvflags=no_duration_filesize]${t.ingestUrl}/${t.streamKey}`)
-           .join("|")];
+    const { video, audio, twitch } = this.config;
+    // Output: in RELAY mode (multistream targets configured) the primary
+    // publishes ONCE to a local RTMP feed that the per-target relays read
+    // (so targets toggle on/off live). Otherwise the legacy single direct
+    // Twitch output.
+    const relay = this._relayMode();
+    const primaryUrl = relay ? this._localFeedUrl() : `${twitch.ingestUrl}/${twitch.streamKey}`;
+    const safeUrl = relay ? "rtmp://127.0.0.1/cs-multi/main (multistream relay)" : `${twitch.ingestUrl}/***`;
+    const redactKeys = relay ? [] : [twitch.streamKey].filter(Boolean);
+    const outputArgs = ["-f", "flv", "-rtmp_live", "live", "-flvflags", "no_duration_filesize", primaryUrl];
     const logLevel = process.env.STREAM_FFMPEG_LOGLEVEL || "warning";
     // Offscreen 'paint' events don't fire at perfectly even intervals,
     // so the wallclock-stamped frames have jittery PTS. Twitch's
@@ -425,9 +592,13 @@ class DesktopStreamer extends EventEmitter {
       ...outputArgs,
     ];
 
-    this.logger.debug({ url: safeUrl, codec: video.codec }, "spawning ffmpeg");
+    this.logger.debug({ url: safeUrl, codec: video.codec, relay }, "spawning ffmpeg");
     this.ffmpeg = spawn(this.ffmpegPath, args, { stdio: ["pipe", "ignore", "pipe"] });
     this.ingestAccepted = false;
+
+    // In relay mode, bring up the per-target relays once the primary has
+    // started publishing to the local feed (give it a moment to connect).
+    if (relay) setTimeout(() => { if (this.state === "running") this._syncRelays(); }, 1500);
 
     let hwEncoderFailed = false;
     const hwFailurePatterns = /v4l2|video11|h264_v4l2m2m|h264_nvenc|h264_qsv|cannot open codec|cannot open device|operation not permitted|no such device/i;
@@ -442,8 +613,7 @@ class DesktopStreamer extends EventEmitter {
     }, INGEST_GRACE_MS);
     this.ffmpeg.once("exit", () => clearTimeout(graceTimer));
 
-    const keys = targets.map((t) => t.streamKey).filter(Boolean);
-    const redact = (s) => keys.reduce((acc, k) => acc.split(k).join("***"), s);
+    const redact = (s) => redactKeys.reduce((acc, k) => acc.split(k).join("***"), s);
     this.ffmpeg.stderr.on("data", (chunk) => {
       const line = redact(chunk.toString().trim());
       if (!line) return;
@@ -588,6 +758,7 @@ class DesktopStreamer extends EventEmitter {
   async _teardown() {
     this._stopWatchdog();
     this._stopRecycleTimer();
+    this._killAllRelays();
     if (this.keepaliveTimer) { clearInterval(this.keepaliveTimer); this.keepaliveTimer = null; }
 
     const deadline = this.config.runtime.teardownTimeoutMs || 10_000;

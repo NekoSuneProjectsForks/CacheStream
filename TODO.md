@@ -99,6 +99,49 @@ user via `test.bat` (desktop debug) and by GitHub Actions on tag. Do **not**
 - [x] **NCS now-playing text** dropped to a lower-third so it doesn't overlap
       the orb.
 
+## ✅ Visualizer iteration 5 (vizzy-style)
+- [x] **Accurate beat** toggle — flash/shake scale with live bass depth
+      (deep drops hit harder; fast attack / slow release + onset emphasis).
+- [x] **Spectrum↔audio sync** — the analysis `<audio>` now seeks to the
+      broadcast's live position (engine `startedAt`) on load + resyncs every 8s,
+      fixing the minutes-long desync after a mid-track scene reload.
+- [x] **Post effects** as options: **zoom pulse** (beat breathing),
+      **vignette**, **hue cycle** (GPU), **bloom** slider (GPU). GPU-heavy ones
+      off by default + labeled.
+
+## ⏳ Vizzy reference layouts (BLOCKED — can't auto-read the editor)
+The vizzy.io editor + open-source pages are client-rendered WebGL/JS apps, so the
+doc fetcher only sees the title — I can't extract their exact effect graphs.
+Confirmed unreachable server-side: `api.vizzy.io` doesn't resolve, and every
+`vizzy.io/api/...` path returns the SPA's index HTML (the project JSON is fetched
+by in-page JS that a non-browser fetch can't execute).
+
+**How to grab the project JSON yourself (30s, in a real browser):**
+  1. Open the editor link, sign in if asked, **F12 → Network**, filter **Fetch/XHR**.
+  2. Reload. Click the request whose name contains the project id
+     (`K3MnXQaW5jLw6YUrO6PxI`) or ends `.json` → **Response** tab.
+  3. Right-click → *Copy response*, paste into a file in
+     `docs/reference/vizzy/<name>.json` (gitignored ok), and tell me — I'll
+     port the exact layers/params.
+  Alt: in the editor, **Console** → `copy(JSON.stringify(window.__APP_STATE__ ?? window.store?.getState?.()))`
+  (or whatever the project store is) also dumps it. If there's an
+  Export/Download in the editor menu, that file works too.
+- [ ] **Trap Nation** ref — vizzy.io/editor?project=K3MnXQaW5jLw6YUrO6PxI
+- [ ] **NCS** ref — vizzy.io/editor?project=GWuREtzXTY_rKHJITJEyh
+- [x] **Nightcore** layout — generic version shipped (smooth filled "mountain"
+      area spectrum). Refine to match vizzy.io/editor?project=mTCbBj6cWyouKRXV3JMUR
+      once the export is available.
+- [x] Added post-effects: **shockwave** (beat ring) + **film grain**.
+- [x] **RGB split / chromatic aberration** — DONE. A TRUE per-channel offset
+      (not a CSS fake): snapshot the spectrum canvas, isolate R/G/B via
+      `multiply` + `destination-in` on scratch canvases, recombine additively
+      (`lighter`) with the red/blue channels offset. Beat-reactive (offset
+      pulses with bass). Implemented on the **2D canvas** rather than WebGL on
+      purpose — the scene renders in an OFFSCREEN Electron window where a
+      per-frame WebGL context is fragile (context loss in the GPU process);
+      the 2D channel split is robust there. Slider in the Visualizer tab.
+- [x] **Scanlines (CRT)** post-effect — static repeating-gradient overlay.
+
 ## 🔜 Visualizer follow-ups (nice-to-have)
 - [ ] Confirm Trap Nation against a reference clip (user to provide) — current
       is the canonical Specterr/cloudnation look; tune amplitude/bloom if needed.
@@ -208,14 +251,38 @@ Design doc: `docs/design/multistream.md`.
 - [x] Stage 2: FFmpeg `tee` output w/ `onfail=ignore`; hot-restart on change.
 - [x] Stage 3: Multistream UI — targets CRUD, enable toggles, egress estimate.
       (Per-target live status DOTS need Phase 1.5's relay manager.)
-- [ ] **Stage 1.5 (NEXT — the requested HOT toggle + protocols):** replace the
-      tee path with a shared local relay (`cs-multi` app on the embedded RTMP
-      server) + independent per-target `-c copy` relay processes, so a target
-      can be turned on/off LIVE without dropping the others. Adds SRT / RTSP /
-      mpegts / custom output protocols (RTMP default; WHEP/FTL unsupported by
-      FFmpeg). Per-target status dots. Full design in
-      `docs/design/multistream.md` §3.1b. Isolated streaming-core change —
-      build + test on its own.
+- [x] **Stage 1.5 — HOT toggle + protocols (DONE, UNTESTED on a live run):**
+      shared local relay (`cs-multi` app on the embedded RTMP server) + one
+      `-c copy` relay process per ENABLED target, so a target toggles on/off
+      LIVE without dropping the others (only entering/leaving relay mode
+      restarts the primary). Protocols: rtmp/rtmps/srt/rtsp/mpegts/custom
+      (WHEP/FTL unsupported). Per-target status (`status().multistream`) →
+      red/orange/green dots in the UI. Twitch + linked platforms auto-seeded;
+      Twitch key mirrored to kv; Stream Info points to the Multistream tab.
+      **Verify on a real run**: the local-relay publish/subscribe + per-target
+      reconnect + status transitions.
+- [x] **Stage 1.6 — Bandwidth / speed-test auto-protect (DONE, UNTESTED on a
+      live run):** `apps/desktop/src/bandwidth.js` `BandwidthMonitor` measures
+      real UPLOAD throughput by POSTing ~8 MB to Cloudflare's speed endpoint
+      (`https://speed.cloudflare.com/__up`, override via `BANDWIDTH_PROBE_URL`)
+      and timing the drain → Mbps. Probes every **20 min** (NOT every few sec —
+      a probe itself costs upload), plus an **early re-test** when relays start
+      flapping (live congestion signal via `noteCongestion`). Keeps a rolling
+      **baseline** (median of recent samples); a fresh sample below
+      `baseline×0.55` is flagged a **rapid drop** (e.g. 100→30 Mbps) with a
+      warning. Computes **maxStreams** = `floor(usableUp×0.8 / perStreamMbps)`.
+      **Auto-protect** (on by default, toggle in the tab): when enabled outputs
+      exceed the link's capacity it HOLDS the extras (`_effectiveEnabledTargets`
+      trims to maxStreams, keeping priority order = Twitch first) and reports
+      them as **"throttled"** (purple dot) instead of letting every output
+      stutter — then restores them when speed recovers (no restart). Surfaced
+      in `status().bandwidth`; controls via `/bandwidth` streamer route +
+      `/api/stream/bandwidth` + a **Network · Auto-protect** card in the
+      Multistream tab (up/baseline/usable/per-output/max/enabled, warning
+      banner, Re-test now). Fail-open: probe unreachable → `unknown`, never caps.
+      **Verify on a real run:** probe accuracy vs a known line speed, the
+      throttle/restore transitions, and that a probe mid-stream doesn't itself
+      cause a frame blip (tune `probeBytes`/`maxProbeMs` if so).
 - [ ] Stage 4: account auto-fill of ingest creds from linked platforms.
 - [ ] Stage 5 (optional): per-target independent ENCODES (different ladders).
 

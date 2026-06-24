@@ -139,6 +139,18 @@ export function VisualizerTab() {
           </label>
 
           <label className="vis-field">
+            <span className="vis-label">Bloom <span className="mono">{Math.round(vis.bloom * 100)}%</span> <span className="muted">GPU</span></span>
+            <input type="range" min={0} max={1} step={0.05} value={vis.bloom}
+                   onChange={(e) => updateVis({ bloom: Number(e.target.value) })} />
+          </label>
+
+          <label className="vis-field">
+            <span className="vis-label">RGB split <span className="mono">{Math.round(vis.rgbSplit * 100)}%</span> <span className="muted">chromatic, beat-reactive</span></span>
+            <input type="range" min={0} max={1} step={0.05} value={vis.rgbSplit}
+                   onChange={(e) => updateVis({ rgbSplit: Number(e.target.value) })} />
+          </label>
+
+          <label className="vis-field">
             <span className="vis-label">Accent</span>
             <input type="color" className="vis-color" value={vis.accent}
                    onChange={(e) => updateVis({ accent: e.target.value })} />
@@ -161,6 +173,41 @@ export function VisualizerTab() {
             <input type="checkbox" checked={vis.shake}
                    onChange={(e) => updateVis({ shake: e.target.checked })} />
             Beat shake <span className="muted">(all)</span>
+          </label>
+          <label className="row" style={{ gap: 8 }}>
+            <input type="checkbox" checked={vis.beatAccurate}
+                   onChange={(e) => updateVis({ beatAccurate: e.target.checked })} />
+            Accurate beat <span className="muted">(scale with bass depth)</span>
+          </label>
+          <label className="row" style={{ gap: 8 }}>
+            <input type="checkbox" checked={vis.zoomPulse}
+                   onChange={(e) => updateVis({ zoomPulse: e.target.checked })} />
+            Zoom pulse <span className="muted">(beat breathing)</span>
+          </label>
+          <label className="row" style={{ gap: 8 }}>
+            <input type="checkbox" checked={vis.vignette}
+                   onChange={(e) => updateVis({ vignette: e.target.checked })} />
+            Vignette
+          </label>
+          <label className="row" style={{ gap: 8 }}>
+            <input type="checkbox" checked={vis.hueCycle}
+                   onChange={(e) => updateVis({ hueCycle: e.target.checked })} />
+            Hue cycle <span className="muted">(GPU)</span>
+          </label>
+          <label className="row" style={{ gap: 8 }}>
+            <input type="checkbox" checked={vis.shockwave}
+                   onChange={(e) => updateVis({ shockwave: e.target.checked })} />
+            Shockwave <span className="muted">(beat ring)</span>
+          </label>
+          <label className="row" style={{ gap: 8 }}>
+            <input type="checkbox" checked={vis.grain}
+                   onChange={(e) => updateVis({ grain: e.target.checked })} />
+            Film grain
+          </label>
+          <label className="row" style={{ gap: 8 }}>
+            <input type="checkbox" checked={vis.scanlines}
+                   onChange={(e) => updateVis({ scanlines: e.target.checked })} />
+            Scanlines <span className="muted">(CRT)</span>
           </label>
           <label className="row" style={{ gap: 8 }}>
             <input type="checkbox" checked={vis.mirror}

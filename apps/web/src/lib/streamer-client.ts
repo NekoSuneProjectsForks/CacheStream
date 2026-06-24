@@ -95,7 +95,28 @@ export interface StreamerStatus {
    * encoder output).
    */
   ingestAccepted?: boolean;
+  multistream?: {
+    active: boolean;
+    targets: Array<{ id: string; label: string; enabled: boolean; state: string }>;
+  };
+  /** Upload bandwidth monitor + multistream auto-protect snapshot. */
+  bandwidth?: {
+    autoProtect: boolean;
+    upMbps: number | null;
+    baselineMbps: number | null;
+    usableMbps: number | null;
+    perStreamMbps: number | null;
+    maxStreams: number | null;
+    wanted: number;
+    warning: string | null;
+    probing: boolean;
+    lastProbeAt: number | null;
+    intervalMs: number;
+    samples: Array<{ mbps: number; at: number }>;
+  };
 }
+
+export interface BandwidthStatus extends NonNullable<StreamerStatus["bandwidth"]> {}
 
 async function call<T>(
   method: "GET" | "POST",
@@ -152,9 +173,17 @@ export const streamer = {
    */
   setIngest: (input: { streamKey?: string | null; ingestUrl?: string | null }) =>
     call<StreamerStatus>("POST", "/ingest", input),
-  /** Multistream targets (restream.io-style multi-RTMP fan-out). */
-  setTargets: (targets: Array<{ ingestUrl: string; streamKey: string; label?: string }>) =>
+  /** Multistream targets (restream.io-style multi-protocol fan-out).
+   *  ingestUrls are EXTERNAL RTMP/SRT/… destinations — not self-pointing
+   *  scene URLs — so they're passed through verbatim (no normalizeOverlay). */
+  setTargets: (targets: Array<{
+    id?: string; label?: string; protocol?: string; ingestUrl: string;
+    streamKey?: string; format?: string; enabled?: boolean;
+  }>) =>
     call<StreamerStatus>("POST", "/targets", { targets }),
+  /** Toggle multistream auto-protect / trigger an immediate bandwidth re-test. */
+  setBandwidthOptions: (opts: { autoProtect?: boolean; retest?: boolean }) =>
+    call<BandwidthStatus>("POST", "/bandwidth", opts),
 };
 
 /** Returns null instead of throwing — useful for status polling. */

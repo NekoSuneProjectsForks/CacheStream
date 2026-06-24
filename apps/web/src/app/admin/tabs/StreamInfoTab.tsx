@@ -289,6 +289,12 @@ function StreamKeyCard() {
         <span className="tag">{tagText}</span>
       </div>
 
+      <div className="banner" style={{ borderColor: "rgba(0,240,255,.35)" }}>
+        ↗ Twitch is now also managed in the <b>Multistream</b> tab (it’s auto-added
+        there as a target). Use Multistream to stream to several platforms at once;
+        this card still lets you fetch/clear the Twitch key.
+      </div>
+
       {info  && <div className="banner ok">✓ {info}</div>}
       {error && <div className="banner err">⚠ {error}</div>}
 

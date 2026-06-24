@@ -86,7 +86,11 @@ export default function MusicScene() {
   // frame rate. `beat` holds the decaying flash/shake envelopes.
   const stageElRef = useRef<HTMLElement | null>(null);
   const flashElRef = useRef<HTMLDivElement | null>(null);
-  const beat = useRef({ env: 0, flash: 0, shake: 0 });
+  const shockElRef = useRef<HTMLDivElement | null>(null);
+  const beat = useRef({ env: 0, flash: 0, shake: 0, prevFlash: 0 });
+
+  // Latest broadcast start time (for keeping the analysis audio in sync).
+  const liveRef = useRef<{ startedAt?: number }>({});
 
   // ---- Poll now-playing ------------------------------------------
   useEffect(() => {
@@ -99,11 +103,24 @@ export default function MusicScene() {
         if (cancelled) return;
         setMode(data.mode);
         setNow(data.nowPlaying);
+        liveRef.current = { startedAt: data.nowPlaying?.startedAt };
       } catch {}
     };
     tick();
     const id = setInterval(tick, POLL_MS);
     return () => { cancelled = true; clearInterval(id); };
+  }, []);
+
+  // ---- Keep the analysis audio in sync with the broadcast ----------
+  // Both play at 1× from the same wall-clock start, but clock drift (or a
+  // mid-track scene reload) can pull them apart. Re-seek to the live
+  // position whenever drift exceeds ~1.5s.
+  useEffect(() => {
+    const id = setInterval(() => {
+      const a = audioRef.current;
+      if (a && a.src && !a.paused) syncAudioToLive(a, liveRef.current.startedAt);
+    }, 8000);
+    return () => clearInterval(id);
   }, []);
 
   // ---- Poll visualizer config (live, applies without reload) -----
@@ -162,6 +179,17 @@ export default function MusicScene() {
     audio.play().catch((err) => {
       console.warn("[music scene] audio.play() denied:", err?.message || err);
     });
+
+    // Sync the analysis audio to the BROADCAST position. The music engine
+    // streams the track in real time from a known wall-clock start
+    // (now.startedAt), but this <audio> always loads from 0:00 — so if the
+    // scene (re)loads mid-track, the spectrum could be minutes out of sync
+    // with what viewers hear. Seek to the live position once metadata is in;
+    // the periodic resync effect corrects any further drift.
+    const startedAt = now.startedAt;
+    const seekLive = () => syncAudioToLive(audio, startedAt);
+    audio.addEventListener("loadedmetadata", seekLive, { once: true });
+    audio.addEventListener("canplay", seekLive, { once: true });
 
     if (!ctxRef.current) {
       const AC = (window.AudioContext || (window as any).webkitAudioContext);
@@ -237,6 +265,48 @@ export default function MusicScene() {
     // Seed particles for the circular layout (cheap, persistent).
     const particles = cfg.particles ? seedParticles(48) : [];
 
+    // Scratch canvases for the RGB-split / chromatic-aberration post-pass
+    // (only allocated/used when rgbSplit > 0). A true per-channel offset:
+    // isolate R/G/B from a snapshot, then recombine additively at offsets.
+    const splitBuf = document.createElement("canvas");
+    const splitCtx = splitBuf.getContext("2d");
+    const chanBuf = document.createElement("canvas");
+    const chanCtx = chanBuf.getContext("2d");
+
+    const applyRgbSplit = () => {
+      if (!splitCtx || !chanCtx) return;
+      if (splitBuf.width !== w || splitBuf.height !== h) {
+        splitBuf.width = w; splitBuf.height = h;
+        chanBuf.width = w; chanBuf.height = h;
+      }
+      // Snapshot the rendered spectrum, then clear the visible canvas.
+      splitCtx.clearRect(0, 0, w, h);
+      splitCtx.drawImage(canvas, 0, 0);
+      ctx.clearRect(0, 0, w, h);
+
+      // Offset grows with the slider and pulses on the beat.
+      const off = cfg.rgbSplit * 14 * dpr * (0.45 + 0.9 * beat.current.flash);
+      const channels: Array<[string, number]> = [
+        ["#ff0000",  off],   // red shifted right
+        ["#00ff00",  0],     // green centred
+        ["#0000ff", -off],   // blue shifted left
+      ];
+      const prev = ctx.globalCompositeOperation;
+      ctx.globalCompositeOperation = "lighter";   // additive recombine
+      for (const [tint, dx] of channels) {
+        chanCtx.globalCompositeOperation = "source-over";
+        chanCtx.clearRect(0, 0, w, h);
+        chanCtx.drawImage(splitBuf, 0, 0);
+        chanCtx.globalCompositeOperation = "multiply";  // keep only this channel's colour
+        chanCtx.fillStyle = tint;
+        chanCtx.fillRect(0, 0, w, h);
+        chanCtx.globalCompositeOperation = "destination-in";  // re-mask to original alpha
+        chanCtx.drawImage(splitBuf, 0, 0);
+        ctx.drawImage(chanBuf, dx, 0);
+      }
+      ctx.globalCompositeOperation = prev;
+    };
+
     const draw = () => {
       resizeIfNeeded();
       ctx.clearRect(0, 0, w, h);
@@ -246,15 +316,16 @@ export default function MusicScene() {
 
       // Read frequency data at most once per frame; shared by the beat
       // FX and the bar/circular layouts.
-      const needFreq = cfg.layout !== "waveform" || cfg.flash || cfg.shake;
+      const beatFx = cfg.flash || cfg.shake || cfg.zoomPulse || cfg.shockwave;
+      const needFreq = cfg.layout !== "waveform" || beatFx;
       let freqReady = false;
       if (live && freqBuf.current && needFreq) {
         an!.getByteFrequencyData(freqBuf.current);
         freqReady = true;
       }
 
-      // ---- Beat-reactive flash + shake (BASS-driven) ----
-      if (cfg.flash || cfg.shake) {
+      // ---- Beat-reactive flash + shake + zoom + shockwave (BASS-driven) ----
+      if (beatFx) {
         let bass: number;
         if (freqReady && freqBuf.current) {
           // At fftSize 256 each bin ≈ 172 Hz; bins 0–5 cover the
@@ -267,11 +338,21 @@ export default function MusicScene() {
         } else {
           bass = 0.4 + 0.3 * Math.abs(Math.sin(performance.now() / 340)); // procedural pulse
         }
-        stepBeat(beat.current, bass);
+        stepBeat(beat.current, bass, cfg.beatAccurate);
+        // Shockwave: re-trigger the CSS ring on a beat onset (a sharp rise).
+        if (cfg.shockwave && shockElRef.current &&
+            beat.current.flash > beat.current.prevFlash + 0.25 && beat.current.flash > 0.45) {
+          const el = shockElRef.current;
+          el.style.animation = "none";
+          void el.offsetWidth;        // force reflow → restart keyframes
+          el.style.animation = "cs-shock 600ms ease-out";
+        }
+        beat.current.prevFlash = beat.current.flash;
       } else {
         // Let any residual envelope decay to rest.
         beat.current.flash = 0;
         beat.current.shake = 0;
+        beat.current.prevFlash = 0;
       }
       // Always apply: keeps the scrim at its base darkening for text
       // readability even with the beat FX off.
@@ -286,23 +367,26 @@ export default function MusicScene() {
           wave = proceduralWave(128);
         }
         drawWaveform(ctx, wave, w, h, cfg);
-        return;
-      }
-
-      // Frequency-domain layouts (bars / mirror / trapnation / ncs / monstercat).
-      let bars: number[];
-      if (freqReady && freqBuf.current) {
-        bars = sampleBars(freqBuf.current, cfg.barCount, cfg.sensitivity);
       } else {
-        bars = procedural(cfg.barCount);
+        // Frequency-domain layouts (bars / mirror / trapnation / ncs / monstercat).
+        let bars: number[];
+        if (freqReady && freqBuf.current) {
+          bars = sampleBars(freqBuf.current, cfg.barCount, cfg.sensitivity);
+        } else {
+          bars = procedural(cfg.barCount);
+        }
+
+        switch (cfg.layout) {
+          case "trapnation": drawTrapNation(ctx, bars, w, h, dpr, cfg, particles); break;
+          case "ncs":        drawNcs(ctx, bars, w, h, dpr, cfg, particles); break;
+          case "monstercat": drawMonstercat(ctx, bars, w, h, dpr, cfg, barGrad!); break;
+          case "nightcore":  drawNightcore(ctx, bars, w, h, dpr, cfg, barGrad!); break;
+          default:           drawBars(ctx, bars, w, h, dpr, cfg, barGrad!);
+        }
       }
 
-      switch (cfg.layout) {
-        case "trapnation": drawTrapNation(ctx, bars, w, h, dpr, cfg, particles); break;
-        case "ncs":        drawNcs(ctx, bars, w, h, dpr, cfg, particles); break;
-        case "monstercat": drawMonstercat(ctx, bars, w, h, dpr, cfg, barGrad!); break;
-        default:           drawBars(ctx, bars, w, h, dpr, cfg, barGrad!);
-      }
+      // Post: true RGB-split / chromatic aberration on the rendered spectrum.
+      if (cfg.rgbSplit > 0) applyRgbSplit();
     };
 
     const fps = Math.max(10, Math.min(30, cfg.fps || 30));
@@ -364,7 +448,10 @@ export default function MusicScene() {
           on the server render and produced a hydration text mismatch. */}
       <style dangerouslySetInnerHTML={{ __html: baseCss }} />
       <style dangerouslySetInnerHTML={{ __html:
-        `.stage{--accent:${cfg.accent};--accent2:${cfg.accent2};}`
+        `.stage{--accent:${cfg.accent};--accent2:${cfg.accent2};}` +
+        (cfg.bloom > 0
+          ? `.stage canvas{filter:drop-shadow(0 0 ${Math.round(cfg.bloom * 22)}px ${cfg.accent});}`
+          : "")
       }} />
 
       {/* ONE stable <main> + <audio>. Only the inner content swaps when
@@ -373,7 +460,7 @@ export default function MusicScene() {
           switch, or the analyser detaches (spectrum freezes) and playback
           is disrupted. So the audio + bg/flash live outside the branch. */}
       <main
-        className={`stage${isCircular ? " stage-circular" : ""}${cfg.layout === "ncs" ? " stage-ncs" : ""}`}
+        className={`stage${isCircular ? " stage-circular" : ""}${cfg.layout === "ncs" ? " stage-ncs" : ""}${cfg.hueCycle ? " hue" : ""}`}
         ref={stageElRef}
       >
         {stageFx}
@@ -427,6 +514,10 @@ export default function MusicScene() {
           </>
         )}
 
+        {cfg.shockwave && <div className="shockwave" ref={shockElRef} />}
+        {cfg.grain && <div className="grain" />}
+        {cfg.scanlines && <div className="scanlines" />}
+        {cfg.vignette && <div className="vignette" />}
         <audio ref={audioRef} muted playsInline preload="auto" crossOrigin="anonymous" />
       </main>
 
@@ -445,6 +536,18 @@ function Clock() {
     return () => clearInterval(id);
   }, []);
   return <span className="clock">{t}</span>;
+}
+
+/** Seek the analysis <audio> to the broadcast's live position (derived from
+ *  the engine's wall-clock track start), if it has drifted by >1.5s. */
+function syncAudioToLive(audio: HTMLAudioElement, startedAt?: number) {
+  if (!startedAt || !Number.isFinite(audio.duration) || audio.duration <= 0) return;
+  const live = (Date.now() - startedAt) / 1000;
+  if (live < 1) return;
+  const target = Math.min(live, audio.duration - 0.3);
+  if (target > 0 && Math.abs(audio.currentTime - target) > 1.5) {
+    try { audio.currentTime = target; } catch {}
+  }
 }
 
 function safeHost(url?: string): string {
@@ -538,12 +641,23 @@ const SHAKE_PX = 5;        // max shake offset (px) — subtle
  * bass hit (low threshold) but each pulse is modest and decays quickly,
  * so the FX happen often without being intense.
  */
-function stepBeat(b: BeatState, bass: number) {
-  const isBeat = bass > b.env * 1.15 && bass > 0.22;
+function stepBeat(b: BeatState, bass: number, accurate: boolean) {
   b.env = b.env * 0.92 + bass * 0.08;
-  if (isBeat) { b.flash = 1; b.shake = 1; }
-  b.flash *= 0.82;
-  b.shake *= 0.80;
+  if (accurate) {
+    // Proportional: track the bass depth with a fast attack + slow release
+    // so a DEEP drop drives a big flash/shake and quiet parts barely move.
+    // `drop` also emphasises sudden rises above the moving average (onsets).
+    const floor = 0.18;
+    const lvl = Math.max(0, (bass - floor) / (1 - floor));        // 0..1
+    const drop = Math.min(1, Math.max(lvl, Math.max(0, bass - b.env) * 2));
+    if (drop > b.flash) { b.flash = drop; b.shake = drop; }       // fast attack
+    else { b.flash *= 0.86; b.shake *= 0.84; }                    // slow release
+  } else {
+    const isBeat = bass > b.env * 1.15 && bass > 0.22;
+    if (isBeat) { b.flash = 1; b.shake = 1; }
+    b.flash *= 0.82;
+    b.shake *= 0.80;
+  }
 }
 
 /** Apply the decaying beat envelope: light shake + a scrim that lifts to
@@ -555,12 +669,18 @@ function applyBeatFx(
   stageEl: HTMLElement | null,
   scrimEl: HTMLDivElement | null,
 ) {
-  if (cfg.shake && stageEl) {
-    const m = b.shake * SHAKE_PX * cfg.beatIntensity;
-    const rx = (Math.random() * 2 - 1) * m;
-    const ry = (Math.random() * 2 - 1) * m;
-    // Slight scale so the shake never reveals the page edges.
-    stageEl.style.transform = `scale(1.02) translate(${rx.toFixed(1)}px, ${ry.toFixed(1)}px)`;
+  if ((cfg.shake || cfg.zoomPulse) && stageEl) {
+    // Combine shake (jitter) + zoom-pulse (beat "breathing") into one
+    // transform. Both use the decaying beat envelope; a small base scale
+    // keeps the shake from revealing the page edges.
+    const zoom = cfg.zoomPulse ? b.flash * 0.06 * cfg.beatIntensity : 0;
+    const scale = (cfg.shake ? 1.02 : 1) + zoom;
+    let tr = "";
+    if (cfg.shake) {
+      const m = b.shake * SHAKE_PX * cfg.beatIntensity;
+      tr = ` translate(${((Math.random() * 2 - 1) * m).toFixed(1)}px, ${((Math.random() * 2 - 1) * m).toFixed(1)}px)`;
+    }
+    stageEl.style.transform = `scale(${scale.toFixed(3)})${tr}`;
   } else if (stageEl && stageEl.style.transform) {
     stageEl.style.transform = "";
   }
@@ -882,6 +1002,61 @@ function drawMonstercat(
   ctx.fillRect(0, h - 2 * dpr, w, 2 * dpr);
 }
 
+/**
+ * Nightcore style — a smooth, bottom-anchored FILLED area spectrum (a
+ * flowing "mountain range" silhouette) with a bright glowing top edge and
+ * a soft reflection. Generic best-effort; refine against a vizzy export.
+ */
+function drawNightcore(
+  ctx: CanvasRenderingContext2D,
+  bars: number[],
+  w: number, h: number, dpr: number,
+  cfg: VisualizerConfig,
+  grad: CanvasGradient,
+) {
+  const sm = smoothArray(bars, 1);
+  const n = sm.length;
+  const pt = (i: number) => ({
+    x: (i / (n - 1)) * w,
+    y: h - Math.max(2, sm[i] * h * 0.95),
+  });
+
+  // Smooth top curve via quadratic segments through the midpoints.
+  const traceTop = () => {
+    const p0 = pt(0);
+    ctx.moveTo(p0.x, p0.y);
+    for (let i = 1; i < n; i++) {
+      const a = pt(i - 1), b = pt(i);
+      ctx.quadraticCurveTo(a.x, a.y, (a.x + b.x) / 2, (a.y + b.y) / 2);
+    }
+    const last = pt(n - 1);
+    ctx.lineTo(last.x, last.y);
+  };
+
+  // Filled body.
+  ctx.beginPath();
+  ctx.moveTo(0, h);
+  ctx.lineTo(pt(0).x, pt(0).y);
+  for (let i = 1; i < n; i++) {
+    const a = pt(i - 1), b = pt(i);
+    ctx.quadraticCurveTo(a.x, a.y, (a.x + b.x) / 2, (a.y + b.y) / 2);
+  }
+  ctx.lineTo(w, h);
+  ctx.closePath();
+  ctx.fillStyle = grad;
+  ctx.globalAlpha = 0.8;
+  ctx.fill();
+  ctx.globalAlpha = 1;
+
+  // Bright glowing top edge.
+  ctx.beginPath();
+  traceTop();
+  ctx.lineJoin = "round";
+  ctx.lineWidth = Math.max(2, dpr * 2.2);
+  ctx.strokeStyle = hexA(cfg.accent, 0.95);
+  ctx.stroke();
+}
+
 /** Rect with rounded top corners only (uses roundRect when available). */
 function roundedTopRect(
   ctx: CanvasRenderingContext2D,
@@ -1122,5 +1297,52 @@ const baseCss = `
     opacity: 0.45;
     transition: opacity 80ms linear;
     will-change: opacity;
+  }
+
+  /* ----- vizzy-style post effects ----- */
+  .vignette {
+    position: absolute; inset: 0;
+    z-index: 40; pointer-events: none;
+    box-shadow: inset 0 0 min(22vw, 280px) rgba(0,0,0,0.72);
+  }
+  /* Slow full-scene hue rotation (GPU — continuous filter). */
+  .stage.hue { animation: cs-hue 14s linear infinite; }
+  @keyframes cs-hue {
+    from { filter: hue-rotate(0deg); }
+    to   { filter: hue-rotate(360deg); }
+  }
+  /* Film grain — a tiling SVG noise overlay (static, cheap). */
+  .grain {
+    position: absolute; inset: 0;
+    z-index: 41; pointer-events: none; opacity: 0.06;
+    mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)'/%3E%3C/svg%3E");
+    background-size: 180px 180px;
+  }
+  /* CRT scanlines — a static repeating gradient overlay (cheap). */
+  .scanlines {
+    position: absolute; inset: 0;
+    z-index: 41; pointer-events: none; opacity: 0.18;
+    mix-blend-mode: multiply;
+    background-image: repeating-linear-gradient(
+      to bottom,
+      rgba(0,0,0,0) 0px,
+      rgba(0,0,0,0) 2px,
+      rgba(0,0,0,0.6) 3px,
+      rgba(0,0,0,0.6) 4px
+    );
+  }
+  /* Shockwave — an expanding ring re-triggered on each beat (animation set
+     imperatively in the render loop). */
+  .shockwave {
+    position: absolute; top: 50%; left: 50%;
+    width: 40vmin; height: 40vmin; margin: -20vmin 0 0 -20vmin;
+    z-index: 39; pointer-events: none; opacity: 0;
+    border: 2px solid var(--accent, #00f0ff);
+    border-radius: 50%;
+  }
+  @keyframes cs-shock {
+    0%   { opacity: 0.7; transform: scale(0.25); }
+    100% { opacity: 0;   transform: scale(2.2); }
   }
 `;

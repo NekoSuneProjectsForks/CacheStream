@@ -163,6 +163,7 @@ async function boot() {
     logger: logger.child({ module: "stream" }),
     ffmpegPath,
     relayOutPort: audioOutPort,
+    rtmpPort,            // local RTMP relay for multistream fan-out
   });
   state.thermal = new ThermalMonitor({ config, streamer: state.streamer, logger: logger.child({ module: "thermal" }) });
   state.thermal.start();

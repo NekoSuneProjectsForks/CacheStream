@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.18.1
+
+Live multistream control + uplink auto-protect, plus more visualizer effects.
+
+**Multistream**
+- **Live on/off per destination** — toggling a target now starts/stops just
+  that output without dropping the others. Each enabled destination runs as its
+  own relay (the encoder publishes once to a local feed), with **red / orange /
+  green status dots** (connected / connecting / failed) per target.
+- **Protocols**: RTMP, RTMPS, SRT, RTSP, MPEG-TS and a custom muxer (copy — no
+  re-encode). WHEP/FTL are flagged as unsupported by FFmpeg.
+- **Twitch is managed here now** — it's auto-added as a target, and any linked
+  platform (Connections) is auto-added too (off until you fill in its ingest).
+  Only **enabled** targets count toward the upload estimate and actually stream.
+
+**Network · Auto-protect (new)**
+- Measures your real **upload speed** every ~20 min (and immediately if an
+  output starts dropping) and shows usable bandwidth, per-output cost and the
+  **max number of simultaneous streams** your line can carry.
+- **Auto-protect**: if you enable more outputs than the uplink can handle it
+  **holds the extras** (purple dot) instead of letting them all stutter, and
+  restores them when your speed recovers. Warns on a **rapid upload drop**
+  (e.g. 100 → 30 Mbps).
+
+**Visualizer**
+- **RGB split / chromatic aberration** post-effect (true per-channel offset,
+  beat-reactive) + a **CRT scanlines** overlay, both in the Visualizer tab.
+
 ## 1.18.0
 
 Music visualizer overhaul, Studio overlays, multi-platform + multistream.

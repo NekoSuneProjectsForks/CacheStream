@@ -104,6 +104,16 @@ function createApi({ streamer, config, logger }) {
       ).catch((err) => send(res, 400, { error: err.message }));
     }
 
+    // Bandwidth / multistream auto-protect controls (desktop streamer).
+    if (req.method === "POST" && url.pathname === "/bandwidth") {
+      if (typeof streamer.setBandwidthOptions !== "function") {
+        return send(res, 404, { error: "not_supported" });
+      }
+      return readJson(req).then((body) =>
+        send(res, 200, streamer.setBandwidthOptions(body || {}))
+      ).catch((err) => send(res, 400, { error: err.message }));
+    }
+
     send(res, 404, { error: "not_found" });
   });
 
