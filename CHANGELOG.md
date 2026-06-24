@@ -1,5 +1,10 @@
 # Changelog
 
+**Contributors** — **CacheNetworks** · 37 commits · **NekoSuneVR** · 32 commits
+_(69 total)_. Counts map AI-assisted commits to the human who shipped them
+(Claude → CacheNetworks); kept up to date each release. See
+[docs/memory/changelog-attribution.md](docs/memory/changelog-attribution.md).
+
 ## 1.18.4
 
 _Committed by NekoSuneVR._

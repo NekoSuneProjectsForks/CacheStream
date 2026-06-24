@@ -1,0 +1,2 @@
+- [Desktop app (Electron)](desktop-app-next-phase.md) — merged to main (v1.14.2+), no Docker, win/linux x64+arm64; now bundles all 3 services incl. embedded RTMP ingest + LAN binding; full next build + live test still pending
+- [Changelog attribution](changelog-attribution.md) — credit the human committer by username (`_Committed by NekoSuneVR._`), never email, never Claude
