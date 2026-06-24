@@ -112,6 +112,7 @@ export interface StreamerStatus {
     probing: boolean;
     lastProbeAt: number | null;
     intervalMs: number;
+    server?: string | null;
     samples: Array<{ mbps: number; at: number }>;
   };
 }

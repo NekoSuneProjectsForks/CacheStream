@@ -52,6 +52,7 @@ interface Bandwidth {
   probing: boolean;
   lastProbeAt: number | null;
   intervalMs: number;
+  server?: string | null;
 }
 
 const mbps = (v: number | null | undefined) =>
@@ -255,8 +256,8 @@ export function MultistreamTab() {
           </button>
           <span className="muted" style={{ fontSize: ".72rem" }}>
             {band?.lastProbeAt
-              ? `last tested ${ago(band.lastProbeAt)}`
-              : band ? "no measurement yet" : "streamer offline / not desktop"}
+              ? `last tested ${ago(band.lastProbeAt)}${band.server ? ` · ${band.server}` : ""}`
+              : band ? `no measurement yet${band.server ? ` · ${band.server}` : ""}` : "streamer offline / not desktop"}
           </span>
         </div>
       </section>

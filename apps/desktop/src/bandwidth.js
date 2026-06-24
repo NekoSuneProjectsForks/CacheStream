@@ -32,7 +32,14 @@ const { URL } = require("node:url");
 const { EventEmitter } = require("node:events");
 
 const DEFAULTS = {
-  probeUrl: process.env.BANDWIDTH_PROBE_URL || "https://speed.cloudflare.com/__up",
+  // Upload target. By default we measure against a nearby Ookla
+  // (speedtest.net) server — fetch the server list, pick the closest, and
+  // POST to its upload endpoint. `BANDWIDTH_PROBE_URL` forces a specific
+  // sink; Cloudflare is the fallback if the Ookla list is unreachable.
+  probeUrlOverride: process.env.BANDWIDTH_PROBE_URL || "",
+  serverListUrl: "https://www.speedtest.net/api/js/servers?engine=js&https_functional=true&limit=10",
+  fallbackUrl: "https://speed.cloudflare.com/__up",
+  serverTtlMs: 60 * 60 * 1000,  // re-pick a speedtest.net server hourly
   intervalMs: 20 * 60 * 1000,   // 20 minutes
   probeBytes: 8 * 1024 * 1024,  // 8 MB
   maxProbeMs: 12_000,           // give up (and use what drained) after 12s
@@ -65,6 +72,10 @@ class BandwidthMonitor extends EventEmitter {
     this.lastProbeAt = 0;
     this.probing = false;
     this.timer = null;
+    // Resolved speedtest.net upload endpoint (cached for serverTtlMs).
+    this._probeUrl = "";
+    this._probeUrlAt = 0;
+    this._probeLabel = null;     // e.g. "speedtest.net — Sponsor · City"
   }
 
   /**
@@ -139,18 +150,49 @@ class BandwidthMonitor extends EventEmitter {
       probing: this.probing,
       lastProbeAt: this.lastProbeAt || null,
       intervalMs: this.opt.intervalMs,
+      server: this._probeLabel,
       samples: this.samples.slice(-this.opt.historyLen),
     };
   }
 
   // ---- probe -----------------------------------------------------
 
+  /**
+   * Resolve the upload endpoint: a forced override, else a nearby
+   * speedtest.net (Ookla) server (cached hourly), else Cloudflare.
+   */
+  async _resolveProbeUrl() {
+    if (this.opt.probeUrlOverride) {
+      this._probeLabel = "custom (BANDWIDTH_PROBE_URL)";
+      return this.opt.probeUrlOverride;
+    }
+    if (this._probeUrl && Date.now() - this._probeUrlAt < this.opt.serverTtlMs) {
+      return this._probeUrl;
+    }
+    try {
+      const picked = await resolveSpeedtestServer(this.opt.serverListUrl, this.logger);
+      if (picked) {
+        this._probeUrl = picked.url;
+        this._probeLabel = picked.label;
+        this._probeUrlAt = Date.now();
+        return this._probeUrl;
+      }
+    } catch (err) {
+      this.logger.warn?.({ err: err?.message }, "bandwidth: speedtest.net server list failed");
+    }
+    // Couldn't reach the Ookla list — use the fallback this once (don't cache
+    // it, so the next probe retries speedtest.net).
+    this._probeLabel = "cloudflare (fallback)";
+    return this._probeUrl || this.opt.fallbackUrl;
+  }
+
   async probe() {
     if (this.probing) return;
     this.probing = true;
     this.emit("change");
     try {
-      const mbps = await measureUpload(this.opt, this.logger);
+      const probeUrl = await this._resolveProbeUrl();
+      const mbps = await measureUpload({ ...this.opt, probeUrl }, this.logger);
       this.lastProbeAt = Date.now();
       if (mbps == null) {
         this.logger.warn?.("bandwidth: probe unreachable; not capping");
@@ -218,6 +260,46 @@ class BandwidthMonitor extends EventEmitter {
 }
 
 /**
+ * Pick a nearby speedtest.net (Ookla) server and return its upload endpoint
+ * + a human label. The server-list `url` field IS the upload.php endpoint;
+ * the list is distance-sorted so the first entry is the closest.
+ */
+async function resolveSpeedtestServer(listUrl, logger) {
+  const json = await httpGetJson(listUrl, 8000);
+  if (!Array.isArray(json) || !json.length) return null;
+  for (const s of json) {
+    let u = s.url || (s.host ? `http://${s.host}/speedtest/upload.php` : null);
+    if (!u) continue;
+    u = u.replace(/^http:\/\//i, "https://");   // the list was filtered https_functional
+    const label = [s.sponsor, s.name, s.country].filter(Boolean).join(" · ") || s.host || "server";
+    logger?.info?.({ server: label, url: u }, "bandwidth: using speedtest.net server");
+    return { url: u, label: `speedtest.net — ${label}` };
+  }
+  return null;
+}
+
+/** Minimal JSON GET with a hard timeout + response-size cap. */
+function httpGetJson(url, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    let target;
+    try { target = new URL(url); } catch { return reject(new Error("bad url")); }
+    const mod = target.protocol === "http:" ? http : https;
+    const req = mod.get(url, { headers: { "user-agent": "CacheStream", accept: "application/json" } }, (res) => {
+      if (res.statusCode && res.statusCode >= 400) { res.resume(); return reject(new Error(`HTTP ${res.statusCode}`)); }
+      let data = "";
+      res.setEncoding("utf8");
+      res.on("data", (c) => {
+        data += c;
+        if (data.length > 1_000_000) { req.destroy(); reject(new Error("response too large")); }
+      });
+      res.on("end", () => { try { resolve(JSON.parse(data)); } catch (e) { reject(e); } });
+    });
+    req.on("error", reject);
+    req.setTimeout(timeoutMs, () => req.destroy(new Error("timeout")));
+  });
+}
+
+/**
  * Push bytes to a sink and measure the drain rate. Returns Mbps, or null
  * if the request never connected / sent nothing.
  */
@@ -235,7 +317,9 @@ function measureUpload(opt, logger) {
         hostname: target.hostname,
         port: target.port || (target.protocol === "http:" ? 80 : 443),
         path: target.pathname + target.search,
-        headers: { "content-type": "application/octet-stream" },
+        // Ookla's upload.php expects a form content-type; harmless for the
+        // Cloudflare fallback (it reads the body length either way).
+        headers: { "content-type": "application/x-www-form-urlencoded", "user-agent": "CacheStream" },
       },
       (res) => { res.on("data", () => {}); res.on("end", () => {}); },
     );

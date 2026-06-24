@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.18.4
+
+- **Upload speed test now uses speedtest.net (Ookla).** The Network ·
+  Auto-protect probe picks a nearby speedtest.net server (cached hourly) and
+  measures upload against it, matching what you'd get from the speedtest.net
+  site. Falls back to Cloudflare only if the server list is unreachable.
+  Override with `BANDWIDTH_PROBE_URL`. The chosen server is shown in the tab.
+
 ## 1.18.3
 
 Framerate hotfix.
