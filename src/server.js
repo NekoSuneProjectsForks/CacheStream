@@ -194,6 +194,10 @@ function createServer({ config, logger = console } = {}) {
       token_type: j.token_type || "bearer",
       expires_in: j.expires_in ?? null,
       scope: Array.isArray(j.scope) ? j.scope.join(" ") : (j.scope || null),
+      // The provider client_id is PUBLIC (not the secret). Apps need it for
+      // provider API calls that require a matching client id header — e.g.
+      // Twitch Helix's `Client-Id`. The secret never leaves the relay.
+      client_id: provider.clientId,
       obtained_at: Date.now(),
     };
   }
