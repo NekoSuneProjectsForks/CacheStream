@@ -6,6 +6,14 @@
  * ./server and call createServer({ config, logger }).listen() directly.
  */
 
+// Quiet Node deprecation warnings (e.g. DEP0180 "fs.Stats is deprecated").
+// This relay has zero dependencies and doesn't touch those APIs — the warning
+// comes from a runtime wrapper like ts-node when a host egg launches us
+// through it. Best-effort: if the wrapper emits it DURING its own bootstrap
+// (before this line runs) it can't be caught here — set the launch flag
+// NODE_OPTIONS=--no-deprecation on the host for a guaranteed silence.
+process.noDeprecation = true;
+
 // Auto-load a .env file if present (Node 20.12+/22+/24). Lets the relay pick
 // up keys on hosts that don't pass --env-file (e.g. a Pterodactyl egg). Real
 // process env still wins for anything already set. Must run before ./config.

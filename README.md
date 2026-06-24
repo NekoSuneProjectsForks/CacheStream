@@ -85,8 +85,11 @@ Check it's up: `GET /healthz` → `{ "ok": true, "providers": [...] }`.
   relay auto-loads it on boot.
 - The generic Node egg may run this via `ts-node`, which prints a harmless
   `DEP0180: fs.Stats … deprecated` warning on Node 22/24. It's from ts-node,
-  **not** the relay (which has zero dependencies). Silence it if you like with
-  `NODE_OPTIONS=--disable-warning=DEP0180`.
+  **not** the relay (zero dependencies; doesn't use that API). The relay sets
+  `process.noDeprecation` itself, but ts-node can emit it during its own
+  bootstrap *before* our code runs — so for a guaranteed silence add a panel
+  variable **`NODE_OPTIONS=--no-deprecation`** (works on every Node version; or
+  `--disable-warning=DEP0180` on Node 21.3+).
 
 ---
 
