@@ -2,6 +2,8 @@
 
 ## 1.18.4
 
+_Committed by NekoSuneVR._
+
 - **Upload speed test now uses speedtest.net (Ookla).** The Network ·
   Auto-protect probe picks a nearby speedtest.net server (cached hourly) and
   measures upload against it, matching what you'd get from the speedtest.net
@@ -9,6 +11,8 @@
   Override with `BANDWIDTH_PROBE_URL`. The chosen server is shown in the tab.
 
 ## 1.18.3
+
+_Committed by NekoSuneVR._
 
 Framerate hotfix.
 
@@ -24,6 +28,8 @@ Framerate hotfix.
 
 ## 1.18.2
 
+_Committed by NekoSuneVR._
+
 Music playback fixes.
 
 - **Loop now repeats the whole library, not one song.** Auto-advance is
@@ -36,6 +42,8 @@ Music playback fixes.
   hiccup), instead of leaving the stream on silence with nothing playing.
 
 ## 1.18.1
+
+_Committed by NekoSuneVR._
 
 Live multistream control + uplink auto-protect, plus more visualizer effects.
 
@@ -64,6 +72,8 @@ Live multistream control + uplink auto-protect, plus more visualizer effects.
   beat-reactive) + a **CRT scanlines** overlay, both in the Visualizer tab.
 
 ## 1.18.0
+
+_Committed by NekoSuneVR._
 
 Music visualizer overhaul, Studio overlays, multi-platform + multistream.
 
