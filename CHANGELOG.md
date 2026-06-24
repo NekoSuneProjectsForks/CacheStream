@@ -113,6 +113,8 @@ fork builds + updates under its own name with no hardcoding.
 
 ## 1.17.0
 
+_Committed by NekoSuneVR._
+
 Desktop app auto-update.
 
 - The desktop app now **checks GitHub Releases for a newer version** on
@@ -126,6 +128,8 @@ Desktop app auto-update.
   the updater reads.
 
 ## 1.16.1
+
+_Committed by NekoSuneVR._
 
 Raspberry Pi 5 Docker FPS fix.
 
@@ -141,6 +145,8 @@ Raspberry Pi 5 Docker FPS fix.
   3-fps stream.
 
 ## 1.16.0
+
+_Committed by NekoSuneVR._
 
 Desktop streaming overhaul: GPU encoding, smooth video + audio, music
 playlist fixes, and a nicer Twitch login.
@@ -193,6 +199,8 @@ playlist fixes, and a nicer Twitch login.
 
 ## 1.15.0
 
+_Committed by NekoSuneVR._
+
 Desktop app becomes a full standalone of all three Docker services, with
 LAN access and HTTPS-free Twitch login.
 
@@ -234,7 +242,16 @@ LAN access and HTTPS-free Twitch login.
 
 - Bumped the web, streamer, and desktop package versions to `1.15.0`.
 
+## 1.14.3
+
+_Committed by NekoSuneVR._
+
+Build / packaging iteration — no functional changes were recorded at
+release time (see commits for details).
+
 ## 1.14.2
+
+_Committed by NekoSuneVR._
 
 Desktop Linux ARM64 packaging and AMD64 Docker streaming fixes.
 
@@ -264,6 +281,8 @@ Desktop Linux ARM64 packaging and AMD64 Docker streaming fixes.
 
 ## 1.14.1
 
+_Committed by NekoSuneVR._
+
 AMD64 Docker streamer stability fix.
 
 ### Docker streamer
@@ -286,6 +305,8 @@ This is primarily for x64/AMD64 Docker deployments using the GHCR or
 local Docker images. ARM64/Pi-specific compose behavior is unchanged.
 
 ## 1.14.0
+
+_Committed by NekoSuneVR._
 
 Native **desktop app** — CacheStream now runs without Docker on
 Linux (x64 + arm64, incl. Raspberry Pi) and Windows (x64 + arm64).
@@ -329,6 +350,8 @@ native runners and attaches the installers to the tagged release.
 
 ## 1.13.9
 
+_Committed by CacheNetworks._
+
 GPU rasterisation for the headless Chromium scene renderer —
 fixes the "scenes are stuck at ~3 fps on a Raspberry Pi" problem.
 
@@ -371,6 +394,8 @@ GPU for rendering but no fixed-function H.264 encoder.
 
 ## 1.13.8
 
+_Committed by CacheNetworks._
+
 Three log-noise fixes — `docker compose logs` was unreadable on
 a healthy idle deployment because of unnecessary 404s and
 ffmpeg pacing warnings.
@@ -409,6 +434,8 @@ The actual broadcast quality is unchanged — these were never
 visible to viewers, just panel-operator-noise.
 
 ## 1.13.7
+
+_Committed by CacheNetworks._
 
 Proper secret-handling for RTMP stream keys in the panel.
 
@@ -463,6 +490,8 @@ still references the old key — you'll need to recreate the
 scene or edit its URL in the Scenes tab).
 
 ## 1.13.6
+
+_Committed by CacheNetworks._
 
 RTMP ingest overhaul. Reports of "OBS connected but 0 frames at
 our server" traced back to the ingest sidecar.
@@ -530,6 +559,8 @@ If a stream was already configured, OBS settings don't change
 — same server URL, same stream key.
 
 ## 1.13.5
+
+_Committed by CacheNetworks._
 
 Memory leak audit + fixes. Client reports of the streamer
 climbing to 70-80% memory over long streams traced back to
@@ -613,6 +644,8 @@ is contained over the next few hours.
 
 ## 1.13.4
 
+_Committed by CacheNetworks._
+
 Fixes the "chat games keep breaking" problem.
 
 ### Root cause: EventEmitter stops dispatching on throw
@@ -652,6 +685,8 @@ responding to chat after a while. The fix is at the bus layer:
     `"undefined: feed"` in the feed log.
 
 ## 1.13.3
+
+_Committed by CacheNetworks._
 
 Long-stream stability — fixes the issue where the streamer
 would silently die after 10+ hours and not reconnect.
@@ -721,6 +756,8 @@ All optional; sensible defaults kick in if unset.
 
 ## 1.13.2
 
+_Committed by CacheNetworks._
+
 Latency & performance pass.
 
 Bug fixes:
@@ -759,6 +796,8 @@ Performance improvements:
   invocation, re-parsing the SQL each time.
 
 ## 1.13.1
+
+_Committed by CacheNetworks._
 
 Streamer performance pass — incorporates the per-frame CDP ack
 fix from the v1.13.0 follow-up PR plus a batch of further wins.
@@ -824,6 +863,8 @@ inside the screencast frame callback. Minor — a few µs per
 frame — but at 30 fps every µs counts.
 
 ## 1.13.0
+
+_Committed by CacheNetworks._
 
 Multi-broadcaster + mobile control panel. Final feature in the
 original v1.x roadmap.
@@ -900,6 +941,8 @@ new tables stay empty until the owner mints their first invite.
 
 ## 1.12.0
 
+_Committed by CacheNetworks._
+
 Custom-command live-stat variables.
 
 Custom commands now have five new response template tokens that
@@ -941,6 +984,8 @@ collapsible reference with all the supported tokens documented
 inline.
 
 ## 1.11.0
+
+_Committed by CacheNetworks._
 
 New "Sources" tab — three new ways to bring external content
 into a scene.
@@ -1001,6 +1046,8 @@ effect on the broadcast until you switch to / reload the scene.
 
 ## 1.10.2
 
+_Committed by CacheNetworks._
+
 Two-part hotfix: RTMP ingest latency down from 60-120 s to
 roughly 5-10 s, and scene switches no longer hard-cut.
 
@@ -1046,6 +1093,8 @@ the wrapper.
 
 ## 1.10.1
 
+_Committed by CacheNetworks._
+
 Memory leak hotfix for the web + streamer containers. Symptom on
 the Pi: web RSS climbed steadily over hours of streaming (often
 past 1GB), eventually OOM-killing or just becoming sluggish.
@@ -1088,6 +1137,8 @@ to confirm the leak is gone: the counts should sit at a small,
 stable value even after many scene switches.
 
 ## 1.10.0
+
+_Committed by CacheNetworks._
 
 Overlay pack — three new scene overlays + a global toggle UI,
 plus quick-pick palette swatches for the accent colour.
@@ -1137,6 +1188,8 @@ keep Now Playing on (existing behaviour) and the new three
 off (so existing streams look identical until you opt in).
 
 ## 1.9.3
+
+_Committed by CacheNetworks._
 
 One-click updates from the panel.
 
@@ -1192,6 +1245,8 @@ Uninstall: `sudo bash scripts/install-updater.sh --uninstall`.
 
 ## 1.9.2
 
+_Committed by CacheNetworks._
+
 Build hotfix — the runner-stage `npm install music-metadata`
 hack from v1.8.2 broke offline / flaky-DNS Pi builds with:
 
@@ -1215,6 +1270,8 @@ build any more.
 
 ## 1.9.1
 
+_Committed by CacheNetworks._
+
 GHCR build hotfix — v1.9.0's release workflow failed to build
 the web image. The ingest scene tried to `await import()` hls.js
 from a remote CDN URL, which webpack rejects: "The target
@@ -1227,6 +1284,8 @@ of every other route's bundle, so the size win is the same — it
 only loads when /scene/ingest is first opened.
 
 ## 1.9.0
+
+_Committed by CacheNetworks._
 
 Four-feature release: fix the dead-chat regression, ship a
 Now-Playing overlay for every scene, cut the music engine's CPU
@@ -1318,6 +1377,8 @@ widget still composite over the OBS feed on the way to Twitch.
 
 ## 1.8.2
 
+_Committed by CacheNetworks._
+
 Two music library fixes:
 
 - **Scanner now actually reads tags + cover art.** Symptom
@@ -1351,6 +1412,8 @@ edited tracks (manual: true) are still preserved across scans.
 
 ## 1.8.1
 
+_Committed by CacheNetworks._
+
 - **Music scene falls back to the broadcaster's logo** for cover
   art when there's no track-embedded image. Cascade is now:
   track cover → broadcaster logo (from Branding tab) → built-in
@@ -1358,6 +1421,8 @@ edited tracks (manual: true) are still preserved across scans.
   at all) now also shows the logo by default.
 
 ## 1.8.0
+
+_Committed by CacheNetworks._
 
 Chat is now Helix end-to-end. The hand-rolled IRC client + IRC
 WebSocket transport are gone. AI Pet scene also gained an
@@ -1401,6 +1466,8 @@ roundtrip.
 
 ## 1.7.6
 
+_Committed by CacheNetworks._
+
 Fixes a race in the chat + EventSub clients that caused every
 chat message to be processed 2-3 times. Symptom: chat commands
 like `!feed` mutating the pet stats 3x per send; activity feeds
@@ -1416,6 +1483,8 @@ showing duplicate entries.
   multiplying every incoming message by the race count.
 
 ## 1.7.5
+
+_Committed by CacheNetworks._
 
 The streamer-side keep-alive fd alone (v1.7.3) wasn't enough to
 unblock FFmpeg's open on music.fifo. FFmpeg's PCM s16le demuxer
@@ -1434,6 +1503,8 @@ side that always writes to music.fifo when no track is playing.
 
 ## 1.7.4
 
+_Committed by CacheNetworks._
+
 Hotfix for v1.7.3 — the music.fifo keep-alive open failed with
 `EACCES: permission denied` on hosts where the FIFO was created
 by the web container (different UID) with the default mode 0644.
@@ -1451,6 +1522,8 @@ If your v1.7.3 deploy showed
 `EACCES: permission denied`, rebuild with 1.7.4 and it'll work.
 
 ## 1.7.3
+
+_Committed by CacheNetworks._
 
 Fixes the real cause of "running but no frames at Twitch": the
 streamer's FFmpeg was hanging forever on the music FIFO open.
@@ -1479,6 +1552,8 @@ If you upgraded straight to 1.7.x and the broadcast went yellow
 
 ## 1.7.2
 
+_Committed by CacheNetworks._
+
 Fixes the Status badge that stayed red on `RUNNING · NOT ON
 TWITCH` even when the broadcast was healthy and Twitch was
 accepting frames.
@@ -1501,6 +1576,8 @@ accepting frames.
 
 ## 1.7.1
 
+_Committed by CacheNetworks._
+
 Fixes the boot-loop introduced by v1.7.0's `.env` slim-down.
 
 - **`INTERNAL_API_TOKEN` is now actually auto-generated**.
@@ -1522,6 +1599,8 @@ environment variable: INTERNAL_API_TOKEN` after upgrading to
 1.7.0, rebuild with 1.7.1 and it'll just work.
 
 ## 1.7.0
+
+_Committed by CacheNetworks._
 
 The "you should never have to touch .env again" release.
 
@@ -1587,6 +1666,8 @@ had in `.env` before is still picked up.
    visit `/setup?force=1`.
 
 ## 1.6.0
+
+_Committed by CacheNetworks._
 
 A reliability + portability release. Boots clean on a Raspberry
 Pi (where v1.5 was failing), auto-tunes encoder settings per
@@ -1723,6 +1804,8 @@ docker compose restart streamer
 
 ## 1.5.0
 
+_Committed by CacheNetworks._
+
 Scenes get a real story — every broadcast staple is now a real
 Next.js route, the operator can author their own from the panel,
 and a unified branding store keeps name + logo + colour consistent
@@ -1818,6 +1901,8 @@ DELETE /api/branding/logo
 
 ## 1.4.0
 
+_Committed by CacheNetworks._
+
 Studio gets a real editor; Music gets uploads, tags, cover art, a
 radio-style scene; VODs (pre-recorded video) are now a first-class
 broadcast source.
@@ -1895,6 +1980,8 @@ A whole new broadcast mode parallel to the live-scene pipeline.
   standalone output.
 
 ## 1.3.0
+
+_Committed by CacheNetworks._
 
 UI + games + CPU optimisation pass. No new external services.
 
@@ -1975,6 +2062,8 @@ apps/streamer/src/{config,stream}.js         CPU tuning knobs
 ```
 
 ## 1.2.0
+
+_Committed by CacheNetworks._
 
 Tier-A platform release. Everything new sits on top of the
 v1.1 streamer + control panel.
@@ -2073,6 +2162,8 @@ If you're upgrading from 1.1:
 The new audio FIFO is created automatically on streamer boot.
 
 ## 1.1.0
+
+_Committed by CacheNetworks._
 
 - Initial split into `apps/web` (Next.js) + `apps/streamer`
   (Puppeteer/FFmpeg worker).

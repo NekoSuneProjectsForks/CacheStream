@@ -15,3 +15,15 @@ apps/desktop/src/app-name.json
 # Optional local desktop build branding override (APP_NAME/GH_OWNER/...).
 # Covered by the `.env` rule above; listed explicitly for clarity.
 apps/desktop/.env
+# Build artifacts — installers + electron-updater metadata. The desktop
+# output dir (apps/desktop/dist) is already ignored, but these patterns
+# catch a stray build dropped anywhere so it can never be committed/pushed.
+# (These belong on GitHub Release assets, not in the repo.)
+*.exe
+*.blockmap
+*.AppImage
+*.deb
+*.dmg
+*.snap
+*.nupkg
+latest*.yml

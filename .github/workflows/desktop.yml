@@ -143,5 +143,35 @@ jobs:
             apps/desktop/dist/*.deb
             apps/desktop/dist/*.exe
             apps/desktop/dist/*.yml
-            apps/desktop/dist/*.blockmap
           if-no-files-found: ignore
+
+  # electron-builder uploads .blockmap files (used for differential auto-
+  # updates) alongside the installers. We don't want them on the Release —
+  # the updater falls back to a full download without them. This runs once,
+  # after every arch has published, and strips every .blockmap asset.
+  strip-blockmaps:
+    needs: build
+    if: github.ref_type == 'tag' || github.event.inputs.version != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Delete .blockmap assets from the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          [ -z "$VERSION" ] && VERSION="$GITHUB_REF_NAME"
+          BARE="${VERSION#v}"
+          for TAG in "$VERSION" "v${BARE}" "${BARE}"; do
+            if gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json assets \
+                -q '.assets[].name | select(endswith(".blockmap"))' \
+                | while read -r A; do
+                    [ -z "$A" ] && continue
+                    echo "deleting $A from $TAG"
+                    gh release delete-asset "$TAG" "$A" -R "$GITHUB_REPOSITORY" --yes || true
+                  done
+              break
+            fi
+          done
