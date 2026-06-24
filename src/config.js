@@ -21,7 +21,9 @@ function bool(v, d) { if (v == null || v === "") return d; return /^(1|true|yes|
 function int(v, d) { const n = parseInt(v, 10); return Number.isFinite(n) ? n : d; }
 
 const config = {
-  port: int(process.env.PORT, 8788),
+  // PORT, or the port the host allocates us (Pterodactyl/most PaaS set
+  // SERVER_PORT), else 8788. Bind 0.0.0.0 so the allocation is reachable.
+  port: int(process.env.PORT || process.env.SERVER_PORT, 8788),
   bindHost: process.env.BIND_HOST || "0.0.0.0",
 
   // Public base the PROVIDER redirects back to. MUST equal the origin you

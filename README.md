@@ -75,6 +75,19 @@ needed) — or Docker.
 
 Check it's up: `GET /healthz` → `{ "ok": true, "providers": [...] }`.
 
+### On a control panel (Pterodactyl / generic Node egg)
+
+- **Startup file:** `src/index.js`.
+- **Port:** the relay listens on `PORT`, or the panel's allocated `SERVER_PORT`
+  if `PORT` is unset — no config needed. Map your domain → that allocation.
+- **Keys:** set `PUBLIC_URL` + `RELAY_<PROVIDER>_CLIENT_ID/_CLIENT_SECRET` as
+  panel **Startup variables** (env), or drop a `.env` in the server root — the
+  relay auto-loads it on boot.
+- The generic Node egg may run this via `ts-node`, which prints a harmless
+  `DEP0180: fs.Stats … deprecated` warning on Node 22/24. It's from ts-node,
+  **not** the relay (which has zero dependencies). Silence it if you like with
+  `NODE_OPTIONS=--disable-warning=DEP0180`.
+
 ---
 
 ## How it works
