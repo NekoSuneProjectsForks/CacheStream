@@ -22,6 +22,7 @@ interface Conn {
 interface Summary {
   connections: Conn[];
   kick: { clientId: string; hasSecret: boolean; redirectUri: string };
+  oauthRelay: { mode: "public" | "local"; url: string; relayRedirectUri: string };
 }
 
 export function ConnectionsTab() {
@@ -53,6 +54,18 @@ export function ConnectionsTab() {
     finally { setBusy(null); }
   };
 
+  const setMode = async (mode: "public" | "local") => {
+    setBusy("mode"); setError(null);
+    try {
+      const d = await apiJson("/api/platforms", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ relayMode: mode }),
+      });
+      setData(d);
+    } catch (e: any) { setError(e.message); }
+    finally { setBusy(null); }
+  };
+
   const unlink = async (platform: string) => {
     if (!confirm(`Unlink ${platform}?`)) return;
     setBusy(`unlink-${platform}`); setError(null);
@@ -73,6 +86,29 @@ export function ConnectionsTab() {
   return (
     <>
       {error && <div className="banner err">⚠ {error}</div>}
+
+      <section className="card">
+        <div className="card-head"><h2>Login method</h2><span className="muted">how platforms authenticate</span></div>
+        <div className="mode-row">
+          <button className={`mode-btn ${data.oauthRelay.mode === "public" ? "on" : ""}`}
+                  disabled={!!busy} onClick={() => setMode("public")}>
+            <span className="mode-title">Public relay</span>
+            <span className="mode-sub">No setup — uses the hosted server</span>
+          </button>
+          <button className={`mode-btn ${data.oauthRelay.mode === "local" ? "on" : ""}`}
+                  disabled={!!busy} onClick={() => setMode("local")}>
+            <span className="mode-title">Local · own keys</span>
+            <span className="mode-sub">Direct OAuth with your own app keys</span>
+          </button>
+        </div>
+        <p className="hint" style={{ marginTop: 8 }}>
+          {data.oauthRelay.mode === "public"
+            ? <>Brokered through <code>{data.oauthRelay.url}</code> — no client id/secret to register.
+                The relay never exposes its keys; tokens come back over a one-time code.</>
+            : <>You register each platform's OAuth app yourself and paste the client id + secret below.
+                Nothing leaves your server.</>}
+        </p>
+      </section>
 
       <section className="card">
         <div className="card-head"><h2>Connections</h2><span className="muted">link your platforms</span></div>
@@ -143,6 +179,20 @@ export function ConnectionsTab() {
         .conn-name { font-weight: 700; }
         .conn-state { font-size: .82rem; margin-top: 2px; }
         .conn-state :global(.ok) { color: var(--ok, #4ade80); }
+
+        .mode-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 6px; }
+        .mode-btn {
+          display: flex; flex-direction: column; gap: 2px; text-align: left;
+          padding: 12px 14px; border-radius: 6px; cursor: pointer;
+          background: rgba(0,0,0,.18); border: 1px solid var(--line); color: inherit;
+          transition: border-color .15s ease, background .15s ease;
+        }
+        .mode-btn:hover { border-color: rgba(0,240,255,.3); }
+        .mode-btn.on { border-color: var(--neon-cyan, #00f0ff); background: rgba(0,240,255,.08); box-shadow: 0 0 14px rgba(0,240,255,.2); }
+        .mode-btn:disabled { opacity: .6; cursor: default; }
+        .mode-title { font-weight: 700; }
+        .mode-sub { font-size: .76rem; color: var(--text-dim, #8b95a7); }
+        @media (max-width: 560px) { .mode-row { grid-template-columns: 1fr; } }
       `}</style>
     </>
   );

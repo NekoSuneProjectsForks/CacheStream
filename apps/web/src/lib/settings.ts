@@ -56,6 +56,16 @@ const SETTINGS = {
     sensitive: true,
   },
 
+  // ---- OAuth relay (broker) mode ---------------------------------
+  // "public" — log in through the hosted relay (no per-user keys).
+  // "local"  — direct OAuth with the user's OWN client id + secret
+  //            (entered below). Default public.
+  oauth_relay_mode: {
+    envKey: "OAUTH_RELAY_MODE",
+    default: "public",
+    sensitive: false,
+  },
+
   // ---- Session signing (auto-generated on first boot) -------------
   session_secret: {
     envKey: "SESSION_SECRET",
