@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.18.2
+
+Music playback fixes.
+
+- **Loop now repeats the whole library, not one song.** Auto-advance is
+  cursor-based off the current track, so it walks the entire library in order
+  and (with Loop on) cycles back to the start — it can no longer get stuck
+  repeating a single track.
+- **Shuffle plays every song once before repeating** (a proper shuffle bag).
+- **Playback no longer silently dies.** A self-healing watchdog resumes the
+  library/radio if a track ever fails to advance (e.g. a transient database
+  hiccup), instead of leaving the stream on silence with nothing playing.
+
 ## 1.18.1
 
 Live multistream control + uplink auto-protect, plus more visualizer effects.

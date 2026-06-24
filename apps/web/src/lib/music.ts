@@ -134,9 +134,26 @@ class MusicEngine {
   private loop = true;
   private shuffle = false;
   private queue: MusicTrack[] = [];
+  /** Shuffle "bag": a shuffled copy of the library consumed one track at a
+   *  time so every song plays once before any repeats (refilled when empty). */
+  private _bag: MusicTrack[] = [];
   private nowPlaying: NowPlaying | null = null;
   private currentRadioUrl: string | null = null;
   private lastError: string | null = null;
+  /**
+   * Self-healing playback watchdog. While we're SUPPOSED to be playing
+   * (mode "library"/"radio") but no track FFmpeg is running, playback has
+   * stalled — the relay then just pads silence forever ("music stopped,
+   * nothing playing"). This timer detects that and resumes.
+   *
+   * Why it's safe to treat `mode!=="idle" && !ffmpeg` as a real stall:
+   * Node is single-threaded and `_spawnFfmpegForInput` is synchronous, so
+   * between clearing `this.ffmpeg` and assigning the next process no other
+   * JS runs — the watchdog can never observe the sub-millisecond handoff
+   * gap. If it ever sees a null ffmpeg in a playing mode, the advance
+   * genuinely died (e.g. a transient throw swallowed in an exit handler).
+   */
+  private _watchdog: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
     this.volume = clamp01(Number(kvGet("music_volume") ?? "0.6"));
@@ -154,6 +171,10 @@ class MusicEngine {
       this._startSilenceFiller();
       this._startMusicFiller();
     }
+    // Keep playback alive: if we're meant to be playing but no track FFmpeg
+    // is running, resume (covers a swallowed advance error, a transient DB
+    // read failure, etc.) so the library/radio never silently dies.
+    this._startPlaybackWatchdog();
   }
 
   status(): MusicStatus {
@@ -334,18 +355,51 @@ class MusicEngine {
   // ---- Internals -------------------------------------------------
 
   private _playNextLibraryTrack(): void {
-    if (this.queue.length === 0) {
-      // If looping and the library has tracks, refill from the library.
-      if (this.loop) {
-        const all = getStore().listMusicTracks();
-        if (all.length === 0) { this.stop(); return; }
-        this.queue = this.shuffle ? shuffle(all) : all;
-      } else {
-        this.stop();
+    let track: MusicTrack | undefined;
+
+    // 1) An explicit queue (user "play this") always takes priority.
+    if (this.queue.length > 0) {
+      track = this.queue.shift();
+    } else {
+      // 2) Auto-advance through the WHOLE library. Cursor-based off the
+      //    currently-playing track id so we always move to the NEXT distinct
+      //    song and cycle the entire library — never get stuck repeating one.
+      let all: MusicTrack[];
+      try {
+        all = getStore().listMusicTracks();
+      } catch (err: any) {
+        // Transient DB read failure (e.g. a concurrent write) — don't kill
+        // playback. Leave mode "library" with no ffmpeg; the watchdog retries.
+        this.lastError = `library read failed: ${err?.message || err}`;
         return;
       }
+      if (all.length === 0) { this.stop(); return; }
+
+      const curId = this.nowPlaying?.trackId;
+      if (this.shuffle) {
+        // Shuffle bag: play every song once (in random order) before any
+        // repeat. Refill + reshuffle when the bag empties.
+        if (this._bag.length === 0) this._bag = shuffle(all);
+        track = this._bag.shift();
+        // Avoid an immediate back-to-back repeat across a bag refill.
+        if (track && all.length > 1 && track.id === curId && this._bag.length > 0) {
+          this._bag.push(track);
+          track = this._bag.shift();
+        }
+      } else {
+        // Sequential: the track after the current one; wrap to the top only
+        // when looping (otherwise stop at the end of the library).
+        const idx = curId ? all.findIndex((t) => t.id === curId) : -1;
+        let nextIdx = idx + 1;
+        if (nextIdx >= all.length) {
+          if (!this.loop) { this.stop(); return; }
+          nextIdx = 0;
+        }
+        track = all[nextIdx];
+      }
     }
-    const track = this.queue.shift()!;
+
+    if (!track) { this.stop(); return; }
     this.mode = "library";
     this.nowPlaying = {
       trackId: track.id,
@@ -467,6 +521,31 @@ class MusicEngine {
     if (!this.ffmpeg) return;
     try { this.ffmpeg.kill("SIGTERM"); } catch {}
     this.ffmpeg = null;
+  }
+
+  /**
+   * Resurrect stalled playback. If we're meant to be playing (mode
+   * "library"/"radio") but no track FFmpeg is running, resume. Safe because
+   * `_spawnFfmpegForInput` is synchronous, so a normal track handoff never
+   * leaves `ffmpeg` null across a tick — only a genuine stall does.
+   */
+  private _startPlaybackWatchdog(): void {
+    if (this._watchdog) return;
+    this._watchdog = setInterval(() => {
+      try {
+        if (this.ffmpeg) return;                         // a track is running
+        if (this.mode === "library") {
+          console.warn("[music] watchdog: library playback stalled — resuming");
+          this._playNextLibraryTrack();
+        } else if (this.mode === "radio" && this.currentRadioUrl) {
+          console.warn("[music] watchdog: radio playback stalled — resuming");
+          this._spawnFfmpegForInput(["-i", this.currentRadioUrl]);
+        }
+      } catch (err) {
+        console.warn("[music] watchdog error:", err);
+      }
+    }, 4000);
+    this._watchdog.unref?.();
   }
 
   /**
