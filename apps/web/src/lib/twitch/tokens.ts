@@ -14,6 +14,7 @@
 
 import { getStore } from "../store";
 import { refreshTokens } from "../oauth";
+import { relayMode, refreshViaRelay } from "../oauth-relay";
 import { reconnectChatIfRunning } from "./chat";
 import { reconnectEventSubIfRunning } from "./eventsub";
 
@@ -52,7 +53,19 @@ async function refresh(): Promise<string> {
 
   inflight = (async () => {
     try {
-      const next = await refreshTokens(tokens.refreshToken!);
+      // PUBLIC mode: refresh through the relay (it holds the secret). LOCAL
+      // mode: refresh directly with the owner's own client id + secret.
+      const next = relayMode() === "public"
+        ? await (async () => {
+            const t = await refreshViaRelay("twitch", tokens.refreshToken!);
+            return {
+              access_token: t.access_token,
+              refresh_token: t.refresh_token,
+              expires_in: t.expires_in ?? 3600,
+              scope: (t.scope || "").split(" ").filter(Boolean),
+            };
+          })()
+        : await refreshTokens(tokens.refreshToken!);
       store.saveTokens({
         accessToken: next.access_token,
         refreshToken: next.refresh_token || tokens.refreshToken,

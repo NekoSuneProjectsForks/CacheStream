@@ -48,6 +48,9 @@ export interface RelayTokens {
   token_type: string;
   expires_in: number | null;
   scope: string | null;
+  /** Provider client_id (PUBLIC, not the secret) — needed for provider API
+   *  calls that require a matching client id header (e.g. Twitch Helix). */
+  client_id?: string;
   obtained_at: number;
 }
 

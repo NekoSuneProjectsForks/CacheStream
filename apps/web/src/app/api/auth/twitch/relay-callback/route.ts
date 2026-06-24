@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { unsign } from "@/lib/cookies";
 import { exchangePickup } from "@/lib/oauth-relay";
+import { setSetting } from "@/lib/settings";
 import { finalizeOwnerLogin, renderError } from "@/lib/twitch/owner-login";
 
 /**
@@ -34,6 +35,12 @@ export async function GET(req: NextRequest) {
   let tok;
   try { tok = await exchangePickup("twitch", pickup); }
   catch { return renderError("Could not complete the login through the relay.", 502); }
+
+  // Twitch Helix needs a Client-Id header matching the token's client. In
+  // public mode that's the RELAY's Twitch app — store its (public) client_id
+  // so every Helix call works. The secret stays on the relay; refresh is
+  // routed back through the relay (see lib/twitch/tokens.ts).
+  if (tok.client_id) setSetting("twitch_client_id", tok.client_id);
 
   return finalizeOwnerLogin(req, {
     access_token: tok.access_token,

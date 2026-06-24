@@ -1,9 +1,26 @@
 # Changelog
 
-**Contributors** — **CacheNetworks** · 37 commits · **NekoSuneVR** · 42 commits
-_(79 total)_. Counts map AI-assisted commits to the human who shipped them
+**Contributors** — **CacheNetworks** · 37 commits · **NekoSuneVR** · 43 commits
+_(80 total)_. Counts map AI-assisted commits to the human who shipped them
 (Claude → CacheNetworks); kept up to date each release. See
 [docs/memory/changelog-attribution.md](docs/memory/changelog-attribution.md).
+
+## 1.20.1
+
+_Committed by NekoSuneVR._
+
+Fix public-relay Twitch login ("Could not load your Twitch profile").
+
+- Twitch's Helix API needs a `Client-Id` header matching the token's app. In
+  public mode the token belongs to the **relay's** Twitch app, so the relay
+  now returns its (public) `client_id` with the tokens and the app stores it —
+  every Helix call works again. The client **secret** still never leaves the
+  relay.
+- **Token refresh** now routes through the relay in public mode (the app has
+  no secret), so sessions don't die after the access token expires.
+
+> Requires the relay (the `oauth-relay` branch / your hosted instance) to be
+> updated too — it now sends `client_id` with tokens.
 
 ## 1.20.0
 
