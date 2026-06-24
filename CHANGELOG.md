@@ -1,9 +1,30 @@
 # Changelog
 
-**Contributors** — **CacheNetworks** · 37 commits · **NekoSuneVR** · 33 commits
-_(70 total)_. Counts map AI-assisted commits to the human who shipped them
+**Contributors** — **CacheNetworks** · 37 commits · **NekoSuneVR** · 39 commits
+_(76 total)_. Counts map AI-assisted commits to the human who shipped them
 (Claude → CacheNetworks); kept up to date each release. See
 [docs/memory/changelog-attribution.md](docs/memory/changelog-attribution.md).
+
+## 1.19.0
+
+_Committed by NekoSuneVR._
+
+OAuth logins through a relay — **Public** (zero-setup) or **Local** (own keys).
+
+- **New "Login method" choice** in the Connections tab:
+  - **Public relay** (default) — link platforms (Kick, more to come) with **no
+    client id/secret to register**. The login is brokered through a hosted
+    relay that holds the keys server-side and hands the app its tokens over a
+    single-use, one-time code (the secret never ships in the app).
+  - **Local · own keys** — the existing direct OAuth2 (PKCE) flow with your own
+    registered app credentials.
+- The relay itself is a small, standalone, dependency-free server (on its own
+  branch) usable as the public hosted instance **or** self-hosted. It brokers
+  Twitch / Kick / YouTube and is easy to extend.
+- Twitch owner sign-in is unchanged.
+
+> Note: the relay login is new and not yet verified against a live provider
+> app end-to-end.
 
 ## 1.18.4
 
