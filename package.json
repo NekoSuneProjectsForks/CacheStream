@@ -1,0 +1,15 @@
+{
+  "name": "oauth-relay",
+  "version": "1.0.0",
+  "private": true,
+  "description": "OAuth2 relay/broker — one stable server-side callback that brokers OAuth logins for native/loopback apps, so they never ship client secrets or register per-user redirect URIs.",
+  "license": "MIT",
+  "type": "commonjs",
+  "main": "src/index.js",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "check": "node --check src/index.js && node --check src/server.js"
+  }
+}
