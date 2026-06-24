@@ -205,6 +205,11 @@ async function boot() {
       INGEST_HTTP_URL: `http://127.0.0.1:${ingestHttpPort}`,
       RTMP_PORT: String(rtmpPort),
       ...(lanIp ? { RTMP_PUBLIC_HOST: lanIp } : {}),
+      // OAuth2 relay (broker) — defaults to the PUBLIC hosted instance so
+      // logins need no per-user OAuth app. Set OAUTH_RELAY_MODE=local +
+      // OAUTH_RELAY_URL=http://127.0.0.1:<port> to self-host / bring own keys.
+      OAUTH_RELAY_MODE: process.env.OAUTH_RELAY_MODE || "public",
+      OAUTH_RELAY_URL: process.env.OAUTH_RELAY_URL || "https://nekostreamappoauth2.nekosunevr.co.uk",
       // Enables the desktop-only session-handoff endpoint used by the
       // "login in external browser" flow.
       DESKTOP: "1",
