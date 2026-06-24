@@ -8,6 +8,7 @@ interface Requirements {
   hasClientSecret: boolean;
   hasSessionSecret: boolean;
   hasOwnerLogin: boolean;
+  relayMode: "public" | "local";
 }
 
 interface Props {
@@ -33,12 +34,9 @@ type Step = "welcome" | "devapp" | "login" | "done";
  *     we never read them back, only show "configured / not yet".
  */
 export function SetupWizard(props: Props) {
-  // Initial step = first unsatisfied requirement.
-  const initial: Step = !props.requirements.hasPublicUrl
-    ? "welcome"
-    : (!props.requirements.hasClientId || !props.requirements.hasClientSecret)
-    ? "devapp"
-    : "login";
+  // Initial step: preflight if PUBLIC_URL is missing, otherwise the login-
+  // method step (so the Public-relay / own-keys choice is always shown).
+  const initial: Step = !props.requirements.hasPublicUrl ? "welcome" : "devapp";
   const [step, setStep] = useState<Step>(initial);
   const [reqs, setReqs] = useState<Requirements>(props.requirements);
   const [error, setError] = useState<string | null>(null);
@@ -237,119 +235,148 @@ function DevAppStep({
   refresh: () => Promise<void>;
   onNext: () => void;
 }) {
+  const [mode, setMode] = useState<"public" | "local">(reqs.relayMode);
   const [clientId, setClientId] = useState("");
   const [clientSecret, setClientSecret] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const save = async () => {
+  // Save just the chosen method (used when switching to Public).
+  const saveMode = async (m: "public" | "local") => {
+    setMode(m); setError(null);
+    try {
+      await fetch("/api/setup/oauth-app", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: m }),
+      });
+      await refresh();
+    } catch (e: any) { setError(e.message); }
+  };
+
+  const continuePublic = async () => {
     setBusy(true); setError(null);
     try {
       const r = await fetch("/api/setup/oauth-app", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clientId, clientSecret }),
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "public" }),
+      });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({})))?.error || `HTTP ${r.status}`);
+      await refresh();
+      onNext();
+    } catch (e: any) { setError(e.message); }
+    finally { setBusy(false); }
+  };
+
+  const saveLocal = async () => {
+    setBusy(true); setError(null);
+    try {
+      const r = await fetch("/api/setup/oauth-app", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "local", clientId, clientSecret }),
       });
       const body = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(body?.error || `HTTP ${r.status}`);
       setClientSecret(""); // don't keep the secret in browser memory
       await refresh();
       onNext();
-    } catch (e: any) {
-      setError(e.message);
-    } finally {
-      setBusy(false);
-    }
+    } catch (e: any) { setError(e.message); }
+    finally { setBusy(false); }
   };
+
+  const keysStored = reqs.relayMode === "local" && reqs.hasClientId && reqs.hasClientSecret;
 
   return (
     <section className="card">
-      <div className="card-head">
-        <h2>Twitch developer application</h2>
-        {reqs.hasClientId && reqs.hasClientSecret && (
-          <span className="tag ok">configured</span>
-        )}
-      </div>
+      <div className="card-head"><h2>Login method</h2></div>
 
-      <p>
-        CacheStream needs its own Twitch developer application so
-        users can log in with Twitch OAuth. This is a one-time setup
-        at <a href="https://dev.twitch.tv/console/apps/create" target="_blank" rel="noreferrer">
-          dev.twitch.tv/console/apps/create
-        </a>.
-      </p>
+      <p>How do you want to log in with Twitch?</p>
 
-      <ol className="setup-list">
-        <li>Open the link above and click <strong>Register Your Application</strong>.</li>
-        <li><strong>Name:</strong> anything (e.g. "CacheStream").</li>
-        <li>
-          <strong>OAuth Redirect URL:</strong> paste this exact value:
-          <CopyBox value={redirectUri} />
-        </li>
-        <li><strong>Category:</strong> Application Integration.</li>
-        <li><strong>Client Type:</strong> Confidential.</li>
-        <li>Click <strong>Create</strong>.</li>
-        <li>Copy the <strong>Client ID</strong> into the box below.</li>
-        <li>Click <strong>New Secret</strong>, then paste it below too.</li>
-      </ol>
-
-      <div className="row gap" style={{ marginTop: "1rem", alignItems: "center" }}>
-        <div className="label">Client ID</div>
-        <input
-          className="input grow mono"
-          value={clientId}
-          onChange={(e) => setClientId(e.target.value.trim())}
-          placeholder={reqs.hasClientId ? "(stored — leave blank to keep)" : "abc123…"}
-          autoComplete="off"
-        />
-      </div>
-
-      <div className="row gap" style={{ marginTop: ".75rem", alignItems: "center" }}>
-        <div className="label">Client Secret</div>
-        <input
-          className="input grow mono"
-          type="password"
-          value={clientSecret}
-          onChange={(e) => setClientSecret(e.target.value.trim())}
-          placeholder={reqs.hasClientSecret ? "(stored — leave blank to keep)" : "xyz789…"}
-          autoComplete="off"
-        />
-      </div>
-
-      <div className="actions" style={{ marginTop: "1rem" }}>
-        <button
-          className="btn-primary"
-          disabled={
-            busy ||
-            // Allow continue if both already stored AND user hasn't typed anything
-            (!clientId && !clientSecret && reqs.hasClientId && reqs.hasClientSecret)
-              ? false
-              : (!clientId || !clientSecret)
-          }
-          onClick={
-            !clientId && !clientSecret && reqs.hasClientId && reqs.hasClientSecret
-              ? onNext
-              : save
-          }
-        >
-          {busy ? "Saving…" : ((reqs.hasClientId && reqs.hasClientSecret && !clientId && !clientSecret) ? "Continue" : "Save & continue")}
+      <div className="mode-row">
+        <button className={`mode-btn ${mode === "public" ? "on" : ""}`}
+                onClick={() => saveMode("public")} disabled={busy}>
+          <span className="mode-title">Public relay <span className="rec">recommended</span></span>
+          <span className="mode-sub">Nothing to set up — just log in. We broker it through a hosted
+            relay; no Twitch developer app needed.</span>
+        </button>
+        <button className={`mode-btn ${mode === "local" ? "on" : ""}`}
+                onClick={() => saveMode("local")} disabled={busy}>
+          <span className="mode-title">Use my own Twitch app</span>
+          <span className="mode-sub">Register your own Twitch developer app and paste its Client ID
+            + Secret. Nothing leaves your server.</span>
         </button>
       </div>
 
+      {mode === "public" ? (
+        <>
+          <p className="hint" style={{ marginTop: "1rem" }}>
+            You'll log in straight away on the next step. Your stream key + chat
+            permissions are granted to you the same way — the relay only brokers
+            the sign-in and never sees your credentials beyond that handshake.
+          </p>
+          <div className="actions" style={{ marginTop: "1rem" }}>
+            <button className="btn-primary" disabled={busy} onClick={continuePublic}>
+              {busy ? "Saving…" : "Continue"}
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
+          <p style={{ marginTop: "1rem" }}>
+            Create a Twitch developer application (one-time) at{" "}
+            <a href="https://dev.twitch.tv/console/apps/create" target="_blank" rel="noreferrer">
+              dev.twitch.tv/console/apps/create
+            </a>.
+          </p>
+          <ol className="setup-list">
+            <li>Click <strong>Register Your Application</strong>.</li>
+            <li><strong>Name:</strong> anything (e.g. "CacheStream").</li>
+            <li><strong>OAuth Redirect URL:</strong> paste this exact value:<CopyBox value={redirectUri} /></li>
+            <li><strong>Category:</strong> Application Integration.</li>
+            <li><strong>Client Type:</strong> Confidential.</li>
+            <li>Click <strong>Create</strong>, copy the <strong>Client ID</strong> below.</li>
+            <li>Click <strong>New Secret</strong>, then paste it below too.</li>
+          </ol>
+
+          <div className="row gap" style={{ marginTop: "1rem", alignItems: "center" }}>
+            <div className="label">Client ID</div>
+            <input className="input grow mono" value={clientId} autoComplete="off"
+              onChange={(e) => setClientId(e.target.value.trim())}
+              placeholder={reqs.hasClientId ? "(stored — leave blank to keep)" : "abc123…"} />
+          </div>
+          <div className="row gap" style={{ marginTop: ".75rem", alignItems: "center" }}>
+            <div className="label">Client Secret</div>
+            <input className="input grow mono" type="password" value={clientSecret} autoComplete="off"
+              onChange={(e) => setClientSecret(e.target.value.trim())}
+              placeholder={reqs.hasClientSecret ? "(stored — leave blank to keep)" : "xyz789…"} />
+          </div>
+
+          <div className="actions" style={{ marginTop: "1rem" }}>
+            <button className="btn-primary"
+              disabled={busy || (!keysStored && (!clientId || !clientSecret))}
+              onClick={keysStored && !clientId && !clientSecret ? onNext : saveLocal}>
+              {busy ? "Saving…" : (keysStored && !clientId && !clientSecret ? "Continue" : "Save & continue")}
+            </button>
+          </div>
+        </>
+      )}
+
       <style jsx>{`
-        .setup-list {
-          margin: 1rem 0;
-          padding-left: 1.4rem;
-          line-height: 1.65;
-          color: var(--text);
+        .mode-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 6px; }
+        .mode-btn {
+          display: flex; flex-direction: column; gap: 4px; text-align: left;
+          padding: 14px 16px; border-radius: 6px; cursor: pointer; color: inherit;
+          background: rgba(0,0,0,.18); border: 1px solid var(--line);
+          transition: border-color .15s ease, background .15s ease;
         }
+        .mode-btn:hover { border-color: rgba(0,240,255,.3); }
+        .mode-btn.on { border-color: var(--neon-cyan); background: rgba(0,240,255,.08); box-shadow: 0 0 16px rgba(0,240,255,.2); }
+        .mode-btn:disabled { opacity: .6; cursor: default; }
+        .mode-title { font-weight: 800; }
+        .mode-title .rec { font-size: .62rem; letter-spacing: .12em; text-transform: uppercase; color: var(--ok, #4ade80); margin-left: 6px; }
+        .mode-sub { font-size: .8rem; color: var(--text-dim); line-height: 1.45; }
+        .setup-list { margin: 1rem 0; padding-left: 1.4rem; line-height: 1.65; color: var(--text); }
         .setup-list li { margin-bottom: 0.35rem; }
-        .label {
-          min-width: 130px;
-          color: var(--text-dim);
-          text-transform: uppercase;
-          font-size: 0.7rem;
-          letter-spacing: 0.22em;
-        }
+        .label { min-width: 130px; color: var(--text-dim); text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.22em; }
+        @media (max-width: 560px) { .mode-row { grid-template-columns: 1fr; } }
       `}</style>
     </section>
   );
@@ -379,9 +406,11 @@ function LoginStep({
         Approve to continue.
       </p>
 
-      <p className="hint">
-        Redirect URL it's expecting: <code>{redirectUri}</code>
-      </p>
+      {reqs.relayMode === "public" ? (
+        <p className="hint">Logging in via the public relay — no Twitch app needed.</p>
+      ) : (
+        <p className="hint">Redirect URL it's expecting: <code>{redirectUri}</code></p>
+      )}
 
       <div className="actions" style={{ marginTop: "1rem", flexWrap: "wrap", gap: ".5rem" }}>
         <a

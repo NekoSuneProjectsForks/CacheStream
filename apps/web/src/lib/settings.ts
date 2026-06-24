@@ -172,14 +172,20 @@ export function setupRequirements(): {
   hasClientSecret: boolean;
   hasSessionSecret: boolean;
   hasOwnerLogin: boolean;
+  relayMode: "public" | "local";
 } {
+  // In PUBLIC relay mode (default) the Twitch app keys live on the relay, not
+  // here — so the "Twitch app" step is satisfied with no local keys.
+  const relayMode = getSetting("oauth_relay_mode") === "local" ? "local" : "public";
+  const publicRelay = relayMode === "public";
   return {
     hasPublicUrl:     !!process.env.PUBLIC_URL?.trim(),
-    hasClientId:      !!getSetting("twitch_client_id"),
-    hasClientSecret:  !!getSetting("twitch_client_secret"),
+    hasClientId:      publicRelay || !!getSetting("twitch_client_id"),
+    hasClientSecret:  publicRelay || !!getSetting("twitch_client_secret"),
     hasSessionSecret: !!getSetting("session_secret"),
     // Owner is tracked separately in the existing owner row.
     // The wizard hands off to the OAuth flow which creates it.
     hasOwnerLogin:    false,
+    relayMode,
   };
 }

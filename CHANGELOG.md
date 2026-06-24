@@ -1,9 +1,30 @@
 # Changelog
 
-**Contributors** — **CacheNetworks** · 37 commits · **NekoSuneVR** · 39 commits
-_(76 total)_. Counts map AI-assisted commits to the human who shipped them
+**Contributors** — **CacheNetworks** · 37 commits · **NekoSuneVR** · 42 commits
+_(79 total)_. Counts map AI-assisted commits to the human who shipped them
 (Claude → CacheNetworks); kept up to date each release. See
 [docs/memory/changelog-attribution.md](docs/memory/changelog-attribution.md).
+
+## 1.20.0
+
+_Committed by NekoSuneVR._
+
+**Log in with Twitch with no developer app** — the setup wizard now offers a
+choice.
+
+- The **first-run setup** Twitch step is now a **Login method** choice:
+  - **Public relay** (default, recommended) — **no Twitch developer app
+    required**. You just click "Log in with Twitch"; the sign-in is brokered
+    through the hosted relay (which holds the keys), and you get your usual
+    stream-key + chat permissions. Zero setup.
+  - **Use my own Twitch app** — the original flow: register a Twitch dev app
+    and paste the Client ID + Secret.
+- Works for the **owner login** end-to-end: ownership, stream-key auto-pull,
+  chat/EventSub boot are unchanged; only how the token is obtained differs. The
+  direct and relay paths share one finalization routine.
+
+> Note: the relay login is new and not yet verified against a live provider
+> app end-to-end.
 
 ## 1.19.0
 

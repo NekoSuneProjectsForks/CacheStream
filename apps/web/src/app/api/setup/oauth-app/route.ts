@@ -24,9 +24,17 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  let body: { clientId?: string; clientSecret?: string };
+  let body: { clientId?: string; clientSecret?: string; mode?: string };
   try { body = await req.json(); }
   catch { return NextResponse.json({ error: "invalid json" }, { status: 400 }); }
+
+  // Login method: "public" = log in through the hosted relay (no Twitch app);
+  // "local" = use the owner's own Twitch app keys (entered below).
+  if (body.mode === "public" || body.mode === "local") {
+    setSetting("oauth_relay_mode", body.mode);
+  }
+  // Public mode needs no local keys — nothing else to do.
+  if (body.mode === "public") return NextResponse.json({ ok: true });
 
   const cid = (body.clientId || "").trim();
   const sec = (body.clientSecret || "").trim();
