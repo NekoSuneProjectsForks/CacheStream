@@ -37,7 +37,37 @@ permissions:
   contents: write
 
 jobs:
+  # Pre-create the GitHub Release ONCE so the parallel matrix builds don't all
+  # race to create it (electron-builder's `--publish always` otherwise has each
+  # arch POST /releases, and the losers get HTTP 422 already_exists — which is
+  # what failed the linux-arm64 publish). With the release pre-created, every
+  # build just uploads its assets to it. The job always runs (so the matrix
+  # `needs` it on branch builds too); the step is a no-op off a tag/dispatch.
+  create-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ensure the GitHub Release exists
+        if: github.ref_type == 'tag' || github.event.inputs.version != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          [ -z "$VERSION" ] && VERSION="$GITHUB_REF_NAME"
+          BARE="${VERSION#v}"
+          for TAG in "$VERSION" "v${BARE}" "${BARE}"; do
+            if gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              echo "release $TAG already exists"; exit 0
+            fi
+          done
+          awk -v v="$BARE" '$0 ~ "^## "v"($| )" {p=1;next} p && /^## [0-9]/ {exit} p {print}' CHANGELOG.md > notes.md || true
+          [ -s notes.md ] || echo "See the changelog for details." > notes.md
+          gh release create "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --title "$BARE" --notes-file notes.md
+
   build:
+    needs: create-release
     strategy:
       fail-fast: false
       matrix:
