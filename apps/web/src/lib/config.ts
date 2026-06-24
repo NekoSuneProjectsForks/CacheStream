@@ -118,6 +118,15 @@ export const config = {
     url: optional("STREAMER_URL", "http://streamer:7789").replace(/\/+$/, ""),
     token: safeRequired("INTERNAL_API_TOKEN", "build-placeholder"),
   },
+  // OAuth2 relay/broker (see the `oauth-relay` branch). New OAuth2 platforms
+  // are brokered server-side so client secrets never ship in the app.
+  // Defaults to the PUBLIC hosted instance (zero setup); set
+  // OAUTH_RELAY_MODE=local + OAUTH_RELAY_URL=http://127.0.0.1:<port> to
+  // self-host / bring your own keys.
+  oauthRelay: {
+    mode: (optional("OAUTH_RELAY_MODE", "public") === "local" ? "local" : "public") as "public" | "local",
+    url: optional("OAUTH_RELAY_URL", "https://nekostreamappoauth2.nekosunevr.co.uk").replace(/\/+$/, ""),
+  },
   scene: {
     defaultUrl: optional("DEFAULT_SCENE_URL", `http://localhost:${port}/scene`),
     // Base origin the STREAMER uses to reach this web app's scene +

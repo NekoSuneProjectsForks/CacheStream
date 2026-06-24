@@ -17,6 +17,10 @@ services:
       NODE_ENV: production
       PORT: ${WEB_PORT:-7788}
       HOSTNAME: 0.0.0.0
+      # OAuth2 relay (broker) — default to the public hosted instance so
+      # logins need no per-user OAuth app. Override in .env to self-host.
+      OAUTH_RELAY_MODE: ${OAUTH_RELAY_MODE:-public}
+      OAUTH_RELAY_URL: ${OAUTH_RELAY_URL:-https://nekostreamappoauth2.nekosunevr.co.uk}
     ports:
       - "${WEB_PORT:-7788}:${WEB_PORT:-7788}"
     volumes:
