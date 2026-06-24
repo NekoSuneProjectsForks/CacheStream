@@ -7,7 +7,9 @@ metadata:
 
 When adding ANY new platform that uses OAuth2 (logins, chat, stream-key, etc.), **always implement the OAuth2 flow server-side through the relay broker — never embed a client_id/secret or per-user redirect registration in the desktop/web app.**
 
-The broker lives in **`apps/oauth-relay/`** on the **`oauth-relay` branch** (server-side data is kept on its own branch, matching the repo's branch-per-target model).
+The broker is a standalone server at the **root of the `oauth-relay` branch** (`src/`, `client/relay-client.js`, README, Dockerfile — that branch is server-only, no app code). Default PUBLIC instance: **https://nekostreamappoauth2.nekosunevr.co.uk** (`DEFAULT_PUBLIC_RELAY` in `client/relay-client.js`).
+
+Apps choose public-vs-local via `config.oauthRelay { mode, url }` (web `lib/config.ts`), env `OAUTH_RELAY_MODE` (`public`|`local`) + `OAUTH_RELAY_URL`, defaulting to the public domain. Desktop sets these in `apps/desktop/src/main.js`; docker in `docker-compose.yml`.
 
 Why: client secrets shipped in a distributable can be extracted; and making every end user register their own OAuth app + localhost redirect URI is slow. The relay holds the secret server-side and exposes ONE stable callback per provider, so end users configure nothing. Whoever runs the relay supplies the keys (`RELAY_<PROVIDER>_CLIENT_ID` / `_SECRET`) — "bring your own keys", server-side only.
 
@@ -19,4 +21,4 @@ Flow (loopback broker / relay): the provider callback hits the **server first, t
 5. app backend → `POST <relay>/oauth/:provider/exchange {pickup}` (server-to-server) → tokens
 6. refresh later via `POST <relay>/oauth/:provider/refresh {refresh_token}` (relay uses the secret)
 
-Security: only loopback `redirect_uri`s accepted; PKCE (per-provider); pickup codes single-use + short TTL; relay holds tokens only ephemerally (during pickup). See `apps/oauth-relay/README.md`. Relates to [[desktop-app-next-phase]].
+Security: only loopback `redirect_uri`s accepted; PKCE (per-provider); pickup codes single-use + short TTL; relay holds tokens only ephemerally (during pickup). See the README at the `oauth-relay` branch root. Relates to [[desktop-app-next-phase]].
